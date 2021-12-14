@@ -320,13 +320,12 @@ case class CurrentBatchTimestamp(
   group = "datetime_funcs",
   since = "1.5.0")
 case class DateAdd(startDate: Expression, days: Expression)
-  extends BinaryExpression with ExpectsInputTypes with NullIntolerant {
+  extends BinaryExpression with ImplicitCastInputTypes with NullIntolerant {
 
   override def left: Expression = startDate
   override def right: Expression = days
 
-  override def inputTypes: Seq[AbstractDataType] =
-    Seq(DateType, TypeCollection(IntegerType, ShortType, ByteType))
+  override def inputTypes: Seq[AbstractDataType] = Seq(DateType, IntegerType)
 
   override def dataType: DataType = DateType
 
@@ -359,12 +358,11 @@ case class DateAdd(startDate: Expression, days: Expression)
   group = "datetime_funcs",
   since = "1.5.0")
 case class DateSub(startDate: Expression, days: Expression)
-  extends BinaryExpression with ExpectsInputTypes with NullIntolerant {
+  extends BinaryExpression with ImplicitCastInputTypes with NullIntolerant {
   override def left: Expression = startDate
   override def right: Expression = days
 
-  override def inputTypes: Seq[AbstractDataType] =
-    Seq(DateType, TypeCollection(IntegerType, ShortType, ByteType))
+  override def inputTypes: Seq[AbstractDataType] = Seq(DateType, IntegerType)
 
   override def dataType: DataType = DateType
 
@@ -1597,7 +1595,8 @@ case class NextDay(
  * Adds an interval to timestamp.
  */
 case class TimeAdd(start: Expression, interval: Expression, timeZoneId: Option[String] = None)
-  extends BinaryExpression with TimeZoneAwareExpression with ExpectsInputTypes with NullIntolerant {
+  extends BinaryExpression with TimeZoneAwareExpression
+    with ImplicitCastInputTypes with NullIntolerant {
 
   def this(start: Expression, interval: Expression) = this(start, interval, None)
 
@@ -2952,7 +2951,7 @@ case class SubtractTimestamps(
     timeZoneId: Option[String] = None)
   extends BinaryExpression
   with TimeZoneAwareExpression
-  with ExpectsInputTypes
+  with ImplicitCastInputTypes
   with NullIntolerant {
 
   def this(endTimestamp: Expression, startTimestamp: Expression) =
