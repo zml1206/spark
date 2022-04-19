@@ -4175,6 +4175,13 @@ object SQLConf {
       .booleanConf
       .createWithDefault(true)
 
+  val COLLECT_SIZE_LIMIT = buildConf("spark.sql.collect.sizeLimit")
+    .internal()
+    .doc("The max number of elements in collect_set or collect_list.")
+    .version("3.2.1")
+    .intConf
+    .createWithDefault(100000)
+
   /**
    * Holds information about keys that have been deprecated.
    *
@@ -5002,6 +5009,8 @@ class SQLConf extends Serializable with Logging {
 
   def allowsTempViewCreationWithMultipleNameparts: Boolean =
     getConf(SQLConf.ALLOW_TEMP_VIEW_CREATION_WITH_MULTIPLE_NAME_PARTS)
+
+  def maxCollectSize: Int = getConf(SQLConf.COLLECT_SIZE_LIMIT)
 
   /** ********************** SQLConf functionality methods ************ */
 
