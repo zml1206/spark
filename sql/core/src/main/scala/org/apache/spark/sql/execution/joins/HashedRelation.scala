@@ -22,13 +22,14 @@ import java.io._
 import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
 import com.esotericsoftware.kryo.io.{Input, Output}
 
-import org.apache.spark.{SparkConf, SparkEnv, SparkException}
+import org.apache.spark.{SparkConf, SparkContext, SparkEnv, SparkException}
 import org.apache.spark.internal.config.{BUFFER_PAGESIZE, MEMORY_OFFHEAP_ENABLED}
 import org.apache.spark.memory._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.physical.BroadcastMode
 import org.apache.spark.sql.errors.QueryExecutionErrors
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.LongType
 import org.apache.spark.unsafe.Platform
 import org.apache.spark.unsafe.map.BytesToBytesMap
@@ -160,6 +161,11 @@ private[execution] object HashedRelation {
         ignoresDuplicatedKey)
     }
   }
+
+  val MEMORY_THRESHOLD = SparkContext.getOrCreate().conf.getOption("spark.driver.memory")
+    .orElse(Option(System.getenv("SPARK_DRIVER_MEMORY")))
+    .map(Utils.memoryStringToMb)
+    .getOrElse(Utils.DEFAULT_DRIVER_MEM_MB) * SQLConf.get.broadcastJoinMemoryFraction
 }
 
 /**
@@ -473,6 +479,8 @@ private[joins] object UnsafeHashedRelation {
     // Create a mapping of buildKeys -> rows
     val keyGenerator = UnsafeProjection.create(key)
     var numFields = 0
+    var numRows = 0
+    val isDriver = SparkEnv.get.executorId.equalsIgnoreCase("driver")
     while (input.hasNext) {
       val row = input.next().asInstanceOf[UnsafeRow]
       numFields = row.numFields()
@@ -491,6 +499,15 @@ private[joins] object UnsafeHashedRelation {
       } else if (isNullAware) {
         binaryMap.free()
         return HashedRelationWithAllNullKeys
+      }
+      numRows += 1
+      if (isDriver && numRows % 100000 == 0
+        && (binaryMap.getTotalMemoryConsumption >> 20) > HashedRelation.MEMORY_THRESHOLD) {
+        binaryMap.free()
+        throw new UnsupportedOperationException(
+          "Can not build an UnsafeHashedRelation that is larger than " +
+            s"${HashedRelation.MEMORY_THRESHOLD}M" +
+            s"(${SQLConf.get.broadcastJoinMemoryFraction} * driver memory)")
       }
     }
 
@@ -825,6 +842,12 @@ private[execution] final class LongToUnsafeRowMap(
   private def grow(inputRowSize: Int): Unit = {
     // There is 8 bytes for the pointer to next value
     val neededNumWords = (cursor - Platform.LONG_ARRAY_OFFSET + 8 + inputRowSize + 7) / 8
+    if ((neededNumWords >> 17) > HashedRelation.MEMORY_THRESHOLD) {
+      throw new UnsupportedOperationException(
+        "Can not build an UnsafeHashedRelation that is larger than " +
+          s"${HashedRelation.MEMORY_THRESHOLD}M" +
+          s"(${SQLConf.get.broadcastJoinMemoryFraction} * driver memory)")
+    }
     if (neededNumWords > page.length) {
       if (neededNumWords > (1 << 30)) {
         throw QueryExecutionErrors.cannotBuildHashedRelationLargerThan8GError()

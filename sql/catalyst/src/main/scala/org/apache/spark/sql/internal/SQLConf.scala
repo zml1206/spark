@@ -585,6 +585,13 @@ object SQLConf {
     .checkValue(_ > 0, "value should be positive")
     .createWithDefault(1)
 
+  val BROADCASTJOIN_MEMORY_FRACTION = buildConf("spark.sql.broadcastJoin.memory.fraction")
+    .doc("Fraction of driver memory to broadcast. If the size in bytes of a broadcast table " +
+      "exceeds Fraction of driver memory, the job will fail.")
+    .version("3.0.1")
+    .doubleConf
+    .createWithDefault(0.5)
+
   val LIMIT_SCALE_UP_FACTOR = buildConf("spark.sql.limit.scaleUpFactor")
     .internal()
     .doc("Minimal increase rate in number of partitions between attempts when executing a take " +
@@ -4610,6 +4617,8 @@ class SQLConf extends Serializable with Logging {
   def autoBroadcastJoinThreshold: Long = getConf(AUTO_BROADCASTJOIN_THRESHOLD)
 
   def limitInitialNumPartitions: Int = getConf(LIMIT_INITIAL_NUM_PARTITIONS)
+
+  def broadcastJoinMemoryFraction: Double = getConf(BROADCASTJOIN_MEMORY_FRACTION)
 
   def limitScaleUpFactor: Int = getConf(LIMIT_SCALE_UP_FACTOR)
 
