@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.spark.SparkEnv;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -329,8 +330,12 @@ public class TaskMemoryManager {
         acquiredButNotUsed += acquired;
         allocatedPages.clear(pageNumber);
       }
-      // this could trigger spilling to free some pages.
-      return allocatePage(size, consumer);
+      if (SparkEnv.get().executorId().equalsIgnoreCase("driver")) {
+        throw e;
+      } else {
+        // this could trigger spilling to free some pages.
+        return allocatePage(size, consumer);
+      }
     }
     page.pageNumber = pageNumber;
     pageTable[pageNumber] = page;
