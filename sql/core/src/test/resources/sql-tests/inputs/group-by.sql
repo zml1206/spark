@@ -254,12 +254,12 @@ SELECT a, mode(b) FROM testData GROUP BY a ORDER BY a;
 
 
 -- SPARK-44846: PushFoldableIntoBranches in complex grouping expressions cause bindReference error
-SELECT c * 2 AS d
+SELECT t2.c * 2 AS d
 FROM (
-         SELECT if(b > 1, 1, b) AS c
+         SELECT if(t1.b > 1, 1, t1.b) AS c
          FROM (
-                  SELECT if(a < 0, 0, a) AS b
-                  FROM VALUES (-1), (1), (2) AS v(a)
+                  SELECT if(t.a < 0, 0, t.a) AS b
+                  FROM VALUES (-1), (1), (2) AS t(a)
                   GROUP BY b
               ) t1
          GROUP BY c
