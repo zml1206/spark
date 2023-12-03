@@ -22,7 +22,7 @@ import org.scalatest.matchers.must.Matchers.the
 import org.apache.spark.TestUtils.{assertNotSpilled, assertSpilled}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, Lag, Literal, NonFoldableLiteral}
 import org.apache.spark.sql.catalyst.optimizer.TransposeWindow
-import org.apache.spark.sql.catalyst.plans.logical.{Window => LogicalWindow}
+import org.apache.spark.sql.catalyst.plans.logical.{Window => LogicalWindow, WindowGroupLimit}
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.exchange.{ENSURE_REQUIREMENTS, Exchange, ShuffleExchangeExec}
@@ -1274,6 +1274,78 @@ class DataFrameWindowFunctionsSuite extends QueryTest
         Row(2, 1)
       )
     )
+  }
+
+  test("SPARK-46228: Insert window group limit node for cumulative aggregation with limit") {
+
+    val nullStr: String = null
+    val df = Seq(
+      ("a", 0, "c"),
+      ("a", 1, "x"),
+      ("a", 2, "y"),
+      ("a", 3, "z"),
+      ("a", 4, ""),
+      ("a", 4, ""),
+      ("b", 1, "h"),
+      ("b", 1, "n"),
+      ("c", 1, "z"),
+      ("c", 1, "a"),
+      ("c", 2, nullStr)).toDF("key", "value", "order")
+    val window = Window.partitionBy($"key").orderBy($"order".asc_nulls_first)
+    val window2 = Window.partitionBy($"key").orderBy($"order".desc_nulls_first)
+    val window3 = Window.orderBy($"order".asc_nulls_first)
+
+    Seq(true, false).foreach { enableEvaluator =>
+      withSQLConf(SQLConf.USE_PARTITION_EVALUATOR.key -> enableEvaluator.toString) {
+        Seq(-1, 100).foreach { threshold =>
+          withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
+            val existWindowGroupLimit =
+              df.withColumn("sum_value", sum("value").over(window))
+              .limit(1)
+              .queryExecution.optimizedPlan.exists {
+                case _: WindowGroupLimit => true
+                case _ => false
+              }
+            if (threshold == -1) {
+              assert(!existWindowGroupLimit)
+            } else {
+              assert(existWindowGroupLimit)
+            }
+            checkAnswer(df.withColumn("sum_value", sum("value").over(window)).limit(1),
+              Seq(
+                Row("a", 4, "", 8)
+              )
+            )
+            checkAnswer(df.withColumn("sum_value", sum("value").over(window2)).limit(7),
+              Seq(
+                Row("a", 0, "c", 6),
+                Row("a", 1, "x", 6),
+                Row("a", 2, "y", 5),
+                Row("a", 3, "z", 3),
+                Row("a", 4, "", 14),
+                Row("a", 4, "", 14),
+                Row("b", 1, "n", 1)
+              )
+            )
+            checkAnswer(df.withColumn("sum_value", sum("value").over(window3)).limit(11),
+              Seq(
+                Row("a", 0, "c", 11),
+                Row("a", 1, "x", 14),
+                Row("a", 2, "y", 16),
+                Row("a", 3, "z", 20),
+                Row("a", 4, "", 10),
+                Row("a", 4, "", 10),
+                Row("b", 1, "h", 12),
+                Row("b", 1, "n", 13),
+                Row("c", 1, "a", 11),
+                Row("c", 1, "z", 20),
+                Row("c", 2, nullStr, 2)
+              )
+            )
+          }
+        }
+      }
+    }
   }
 
   test("SPARK-37099: Insert window group limit node for top-k computation") {
