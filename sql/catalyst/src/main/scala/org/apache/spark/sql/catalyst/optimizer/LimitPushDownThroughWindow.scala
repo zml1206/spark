@@ -32,7 +32,7 @@ import org.apache.spark.sql.catalyst.trees.TreePattern.{LIMIT, WINDOW}
 object LimitPushDownThroughWindow extends Rule[LogicalPlan] {
   // The window frame of Rank, DenseRank and RowNumber can only be UNBOUNDED PRECEDING to
   // CURRENT ROW.
-  private def supportsPushdownThroughWindow(
+  private[catalyst] def supportsPushdownThroughWindow(
       windowExpressions: Seq[NamedExpression]): Boolean = windowExpressions.forall {
     case Alias(WindowExpression(_: Rank | _: DenseRank | _: RowNumber, WindowSpecDefinition(Nil, _,
         SpecifiedWindowFrame(RowFrame, UnboundedPreceding, CurrentRow))), _) => true

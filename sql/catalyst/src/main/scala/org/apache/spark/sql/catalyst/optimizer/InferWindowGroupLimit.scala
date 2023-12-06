@@ -80,6 +80,7 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
     limit <= conf.windowGroupLimitThreshold && window.child.maxRows.forall(_ > limit) &&
       !window.child.isInstanceOf[WindowGroupLimit] &&
       window.orderSpec.exists(!_.foldable) &&
+      !LimitPushDownThroughWindow.supportsPushdownThroughWindow(window.windowExpressions) &&
       window.windowExpressions.forall {
         case Alias(WindowExpression(windowFunction, WindowSpecDefinition(_, _,
         SpecifiedWindowFrame(_, UnboundedPreceding, CurrentRow))), _)
