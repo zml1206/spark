@@ -89,19 +89,32 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
     case _ => false
   }
 
+  def rankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression = {
+    // If windowExpressions only contains row_number/rank/dens_rank, choose SimpleLimitIterator,
+    // else RankLimitIterator to Obtain enough rows to ensure data accuracy.
+    if (supportsPushdownThroughWindow(windowExpressions)) {
+      new RowNumber
+    } else {
+      new Rank
+    }
+  }
+
   def apply(plan: LogicalPlan): LogicalPlan = {
     if (conf.windowGroupLimitThreshold == -1) return plan
 
     plan.transformWithPruning(
       t => t.containsPattern(WINDOW) && t.containsAnyPattern(FILTER, LIMIT), ruleId) {
       case localLimit @ LocalLimit(IntegerLiteral(limit),
-        window @ Window(_, partitionSpec, orderSpec, child)) if limitSupport(limit, window) =>
-        // RankLimitIterator is selected through rank() to ensure that enough rows are obtained.
-        val windowGroupLimit = WindowGroupLimit(partitionSpec, orderSpec, new Rank(), limit, child)
+        window @ Window(windowExpressions, partitionSpec, orderSpec, child))
+        if limitSupport(limit, window) =>
+        val windowGroupLimit = WindowGroupLimit(
+          partitionSpec, orderSpec, rankLikeFunction(windowExpressions), limit, child)
         localLimit.withNewChildren(Seq(window.withNewChildren(Seq(windowGroupLimit))))
       case localLimit @ LocalLimit(IntegerLiteral(limit), project @ Project(_,
-        window @ Window(_, partitionSpec, orderSpec, child))) if limitSupport(limit, window) =>
-        val windowGroupLimit = WindowGroupLimit(partitionSpec, orderSpec, new Rank(), limit, child)
+        window @ Window(windowExpressions, partitionSpec, orderSpec, child)))
+        if limitSupport(limit, window) =>
+        val windowGroupLimit = WindowGroupLimit(
+          partitionSpec, orderSpec, rankLikeFunction(windowExpressions), limit, child)
         localLimit.withNewChildren(Seq(
           project.withNewChildren(Seq(window.withNewChildren(Seq(windowGroupLimit))))))
       case filter @ Filter(condition,
