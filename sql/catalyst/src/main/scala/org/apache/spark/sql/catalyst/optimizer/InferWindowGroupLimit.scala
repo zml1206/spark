@@ -61,9 +61,8 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
    */
   private def isExpandingWindow(
       windowExpression: NamedExpression): Boolean = windowExpression match {
-    case Alias(WindowExpression(windowFunction, WindowSpecDefinition(_, _,
-        SpecifiedWindowFrame(_, UnboundedPreceding, CurrentRow))), _)
-      if !windowFunction.isInstanceOf[SizeBasedWindowFunction] => true
+    case Alias(WindowExpression(_, WindowSpecDefinition(_, _,
+    SpecifiedWindowFrame(RowFrame, UnboundedPreceding, CurrentRow))), _) => true
     case _ => false
   }
 
@@ -72,31 +71,29 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
     case _ => false
   }
 
+  /**
+   * All window expressions should not have SizeBasedWindowFunction, all lower/upper of
+   * specifiedWindowFrame is UnboundedPreceding/CurrentRow, and window orderSpec is not foldable,
+   * so that we can safely do the early stop.
+   */
   private def limitSupport(limit: Int, window: Window): Boolean =
     limit <= conf.windowGroupLimitThreshold && window.child.maxRows.forall(_ > limit) &&
       !window.child.isInstanceOf[WindowGroupLimit] &&
-      window.windowExpressions.forall(isExpandingWindow) &&
       window.orderSpec.exists(!_.foldable) &&
-      // LimitPushDownThroughWindow have better performance than WindowGroupLimit if the
-      // window function is Rank, DenseRank and RowNumber, and Window partitionSpec is empty.
-      !(window.partitionSpec.isEmpty && supportsPushdownThroughWindow(window.windowExpressions) &&
-        limit < conf.topKSortFallbackThreshold)
-
-  private def supportsPushdownThroughWindow(
-      windowExpressions: Seq[NamedExpression]): Boolean = windowExpressions.forall {
-    case Alias(WindowExpression(_: Rank | _: DenseRank | _: RowNumber, WindowSpecDefinition(Nil, _,
-      SpecifiedWindowFrame(_, UnboundedPreceding, CurrentRow))), _) => true
-    case _ => false
-  }
+      window.windowExpressions.forall {
+        case Alias(WindowExpression(windowFunction, WindowSpecDefinition(_, _,
+        SpecifiedWindowFrame(_, UnboundedPreceding, CurrentRow))), _)
+          if !windowFunction.isInstanceOf[SizeBasedWindowFunction] => true
+        case _ => false
+      }
 
   private def isRowFrame(windowExpression: NamedExpression): Boolean = windowExpression match {
-    case Alias(WindowExpression(windowFunction, WindowSpecDefinition(_, _,
-    SpecifiedWindowFrame(RowFrame, UnboundedPreceding, CurrentRow))), _)
-      if !windowFunction.isInstanceOf[SizeBasedWindowFunction] => true
+    case Alias(WindowExpression(_, WindowSpecDefinition(_, _,
+    SpecifiedWindowFrame(RowFrame, UnboundedPreceding, CurrentRow))), _) => true
     case _ => false
   }
 
-  def rankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression =
+  private def rankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression =
     // If windowExpressions all are RowFrame, choose SimpleLimitIterator,
     // else RankLimitIterator to obtain enough rows for ensure data accuracy.
     if (windowExpressions.forall(isRowFrame)) {
