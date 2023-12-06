@@ -89,15 +89,14 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
     case _ => false
   }
 
-  def rankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression = {
+  def rankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression =
     // If windowExpressions only contains row_number/rank/dens_rank, choose SimpleLimitIterator,
     // else RankLimitIterator to Obtain enough rows to ensure data accuracy.
-    if (supportsPushdownThroughWindow(windowExpressions)) {
+    if (windowExpressions.forall(support)) {
       new RowNumber
     } else {
       new Rank
     }
-  }
 
   def apply(plan: LogicalPlan): LogicalPlan = {
     if (conf.windowGroupLimitThreshold == -1) return plan
