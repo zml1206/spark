@@ -1299,7 +1299,53 @@ class DataFrameWindowFunctionsSuite extends QueryTest
       withSQLConf(SQLConf.USE_PARTITION_EVALUATOR.key -> enableEvaluator.toString) {
         Seq(-1, 100).foreach { threshold =>
           withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
-            val existWindowGroupLimit =
+            // RowFrame
+            val existWindowGroupLimitRowFrame =
+              df.withColumn("sum_value", sum("value").over(window))
+                .limit(1)
+                .queryExecution.optimizedPlan.exists {
+                case _: WindowGroupLimit => true
+                case _ => false
+              }
+            if (threshold == -1) {
+              assert(!existWindowGroupLimitRowFrame)
+            } else {
+              assert(existWindowGroupLimitRowFrame)
+            }
+            checkAnswer(df.withColumn("rn", row_number().over(window)).limit(1),
+              Seq(
+                Row("a", 4, "", 1)
+              )
+            )
+            checkAnswer(df.withColumn("rn", rank().over(window2)).limit(7),
+              Seq(
+                Row("a", 0, "c", 4),
+                Row("a", 1, "x", 3),
+                Row("a", 2, "y", 2),
+                Row("a", 3, "z", 1),
+                Row("a", 4, "", 5),
+                Row("a", 4, "", 5),
+                Row("b", 1, "n", 1)
+              )
+            )
+            checkAnswer(df.withColumn("rn", dense_rank().over(window3)).limit(11),
+              Seq(
+                Row("a", 0, "c", 4),
+                Row("a", 1, "x", 7),
+                Row("a", 2, "y", 8),
+                Row("a", 3, "z", 9),
+                Row("a", 4, "", 2),
+                Row("a", 4, "", 2),
+                Row("b", 1, "h", 5),
+                Row("b", 1, "n", 6),
+                Row("c", 1, "a", 3),
+                Row("c", 1, "z", 9),
+                Row("c", 2, nullStr, 1)
+              )
+            )
+
+            // RangeFrame
+            val existWindowGroupLimitRangeFrame =
               df.withColumn("sum_value", sum("value").over(window))
               .limit(1)
               .queryExecution.optimizedPlan.exists {
@@ -1307,9 +1353,9 @@ class DataFrameWindowFunctionsSuite extends QueryTest
                 case _ => false
               }
             if (threshold == -1) {
-              assert(!existWindowGroupLimit)
+              assert(!existWindowGroupLimitRangeFrame)
             } else {
-              assert(existWindowGroupLimit)
+              assert(existWindowGroupLimitRangeFrame)
             }
             checkAnswer(df.withColumn("sum_value", sum("value").over(window)).limit(1),
               Seq(

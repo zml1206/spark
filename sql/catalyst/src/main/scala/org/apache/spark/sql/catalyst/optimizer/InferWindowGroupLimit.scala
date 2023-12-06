@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.catalyst.optimizer
 
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, CurrentRow, DenseRank, EqualTo, Expression, GreaterThan, GreaterThanOrEqual, IntegerLiteral, LessThan, LessThanOrEqual, Literal, NamedExpression, PredicateHelper, Rank, RowNumber, SizeBasedWindowFunction, SpecifiedWindowFrame, UnboundedPreceding, WindowExpression, WindowSpecDefinition}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, CurrentRow, DenseRank, EqualTo, Expression, GreaterThan, GreaterThanOrEqual, IntegerLiteral, LessThan, LessThanOrEqual, Literal, NamedExpression, PredicateHelper, Rank, RowFrame, RowNumber, SizeBasedWindowFunction, SpecifiedWindowFrame, UnboundedPreceding, WindowExpression, WindowSpecDefinition}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{FILTER, LIMIT, WINDOW}
@@ -33,8 +33,8 @@ import org.apache.spark.sql.catalyst.trees.TreePattern.{FILTER, LIMIT, WINDOW}
  *   SELECT *, ROW_NUMBER() OVER(PARTITION BY k ORDER BY a) AS rn FROM Tab1 WHERE 5 > rn
  *   SELECT *, ROW_NUMBER() OVER(PARTITION BY k ORDER BY a) AS rn FROM Tab1 WHERE rn <= 5
  *   SELECT *, ROW_NUMBER() OVER(PARTITION BY k ORDER BY a) AS rn FROM Tab1 WHERE 5 >= rn
- *   SELECT *, ROW_NUMBER() OVER(PARTITION BY k ORDER BY a) AS rn FROM Tab1 limit 5
- *   SELECT *, sum(b) OVER(PARTITION BY k ORDER BY a) AS s FROM Tab1 limit 5
+ *   SELECT *, ROW_NUMBER() OVER(PARTITION BY k ORDER BY a) AS rn FROM Tab1 LIMIT 5
+ *   SELECT *, sum(b) OVER(PARTITION BY k ORDER BY a) AS s FROM Tab1 LIMIT 5
  * }}}
  */
 object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
@@ -89,10 +89,17 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
     case _ => false
   }
 
+  private def isRowFrame(windowExpression: NamedExpression): Boolean = windowExpression match {
+    case Alias(WindowExpression(windowFunction, WindowSpecDefinition(_, _,
+    SpecifiedWindowFrame(RowFrame, UnboundedPreceding, CurrentRow))), _)
+      if !windowFunction.isInstanceOf[SizeBasedWindowFunction] => true
+    case _ => false
+  }
+
   def rankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression =
-    // If windowExpressions only contains row_number/rank/dens_rank, choose SimpleLimitIterator,
-    // else RankLimitIterator to Obtain enough rows to ensure data accuracy.
-    if (windowExpressions.forall(support)) {
+    // If windowExpressions all are RowFrame, choose SimpleLimitIterator,
+    // else RankLimitIterator to obtain enough rows for ensure data accuracy.
+    if (windowExpressions.forall(isRowFrame)) {
       new RowNumber
     } else {
       new Rank
