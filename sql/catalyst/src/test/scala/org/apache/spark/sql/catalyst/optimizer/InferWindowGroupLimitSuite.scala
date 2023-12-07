@@ -360,6 +360,26 @@ class InferWindowGroupLimitSuite extends PlanTest {
       WithoutOptimize.execute(correctAnswer.analyze))
   }
 
+  test("Insert window group limit node for partitionSpec is not empty and rank-like with limit") {
+    val originalQuery =
+      testRelation
+        .select(a, b, c,
+          windowExpr(RowNumber(),
+            windowSpec(a :: Nil, c.desc :: Nil, windowRowFrame)).as("rn"))
+        .limit(1)
+
+    val correctAnswer =
+      testRelation
+        .windowGroupLimit(a :: Nil, c.desc :: Nil, RowNumber(), 1)
+        .select(a, b, c,
+          windowExpr(RowNumber(),
+            windowSpec(a :: Nil, c.desc :: Nil, windowRowFrame)).as("rn"))
+        .limit(1)
+    comparePlans(
+      Optimize.execute(originalQuery.analyze),
+      WithoutOptimize.execute(correctAnswer.analyze))
+  }
+
   test("Insert window group limit node for partitionSpec is not empty and all the orderSpec are " +
     "foldable and all the window expressions are RowFrame with limit") {
     val originalQuery =
@@ -377,7 +397,7 @@ class InferWindowGroupLimitSuite extends PlanTest {
         .select(a, b, c,
           windowExpr(RowNumber(),
             windowSpec(a :: Nil, Literal(1).desc :: Nil, windowRowFrame)).as("rn1"),
-          windowExpr(Rank(Literal(1) :: Nil),
+          windowExpr(new Rank(),
             windowSpec(a :: Nil, Literal(1).desc :: Nil, windowRowFrame)).as("rn2"))
         .limit(1)
     comparePlans(
@@ -409,5 +429,16 @@ class InferWindowGroupLimitSuite extends PlanTest {
     comparePlans(
       Optimize.execute(originalQuery2.analyze),
       WithoutOptimize.execute(originalQuery2.analyze))
+
+    // unsupported partitionSpec is empty and rank-like with limit
+    val originalQuery3 =
+      testRelation
+        .select(a, b, c,
+          windowExpr(RowNumber(),
+            windowSpec(Nil, c.desc :: Nil, windowRowFrame)).as("rn"))
+        .limit(1)
+    comparePlans(
+      Optimize.execute(originalQuery3.analyze),
+      WithoutOptimize.execute(originalQuery3.analyze))
   }
 }
