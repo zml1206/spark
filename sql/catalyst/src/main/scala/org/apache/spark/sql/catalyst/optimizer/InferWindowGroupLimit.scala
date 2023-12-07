@@ -34,7 +34,8 @@ import org.apache.spark.sql.catalyst.trees.TreePattern.{FILTER, LIMIT, WINDOW}
  *   SELECT *, ROW_NUMBER() OVER(PARTITION BY k ORDER BY a) AS rn FROM Tab1 WHERE rn <= 5
  *   SELECT *, ROW_NUMBER() OVER(PARTITION BY k ORDER BY a) AS rn FROM Tab1 WHERE 5 >= rn
  *   SELECT *, ROW_NUMBER() OVER(PARTITION BY k ORDER BY a) AS rn FROM Tab1 LIMIT 5
- *   SELECT *, sum(b) OVER(PARTITION BY k ORDER BY a) AS s FROM Tab1 LIMIT 5
+ *   SELECT *, SUM(b) OVER(PARTITION BY k ORDER BY a) AS s FROM Tab1 LIMIT 5
+ *   SELECT *, SUM(b) OVER(ORDER BY a) AS s FROM Tab1 LIMIT 5
  * }}}
  */
 object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
@@ -80,11 +81,13 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
     limit <= conf.windowGroupLimitThreshold && window.child.maxRows.forall(_ > limit) &&
       !window.child.isInstanceOf[WindowGroupLimit] &&
       window.orderSpec.exists(!_.foldable) &&
-      !LimitPushDownThroughWindow.supportsPushdownThroughWindow(window.windowExpressions) &&
       window.windowExpressions.forall {
         case Alias(WindowExpression(windowFunction, WindowSpecDefinition(_, _,
         SpecifiedWindowFrame(_, UnboundedPreceding, CurrentRow))), _)
-          if !windowFunction.isInstanceOf[SizeBasedWindowFunction] => true
+          if !windowFunction.isInstanceOf[SizeBasedWindowFunction] &&
+            // LimitPushDownThroughWindow have better performance than WindowGroupLimit if the
+            // window function is RowNumber and Window partitionSpec is empty.
+            (!support(windowFunction) || window.partitionSpec.nonEmpty) => true
         case _ => false
       }
 
@@ -94,7 +97,7 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
     case _ => false
   }
 
-  private def rankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression =
+  private def selectRankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression =
     // If windowExpressions all are RowFrame, choose SimpleLimitIterator,
     // else RankLimitIterator to obtain enough rows for ensure data accuracy.
     if (windowExpressions.forall(isRowFrame)) {
@@ -112,13 +115,13 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
         window @ Window(windowExpressions, partitionSpec, orderSpec, child))
         if limitSupport(limit, window) =>
         val windowGroupLimit = WindowGroupLimit(
-          partitionSpec, orderSpec, rankLikeFunction(windowExpressions), limit, child)
+          partitionSpec, orderSpec, selectRankLikeFunction(windowExpressions), limit, child)
         localLimit.withNewChildren(Seq(window.withNewChildren(Seq(windowGroupLimit))))
       case localLimit @ LocalLimit(IntegerLiteral(limit), project @ Project(_,
         window @ Window(windowExpressions, partitionSpec, orderSpec, child)))
         if limitSupport(limit, window) =>
         val windowGroupLimit = WindowGroupLimit(
-          partitionSpec, orderSpec, rankLikeFunction(windowExpressions), limit, child)
+          partitionSpec, orderSpec, selectRankLikeFunction(windowExpressions), limit, child)
         localLimit.withNewChildren(Seq(
           project.withNewChildren(Seq(window.withNewChildren(Seq(windowGroupLimit))))))
       case filter @ Filter(condition,
