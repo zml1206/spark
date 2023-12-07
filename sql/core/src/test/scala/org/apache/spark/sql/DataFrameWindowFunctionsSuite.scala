@@ -1388,6 +1388,18 @@ class DataFrameWindowFunctionsSuite extends QueryTest
                 Row("c", 2, nullStr, 2)
               )
             )
+
+            // Choose LimitPushDownThroughWindow instead of WindowGroupLimit if the
+            // window function is rank-like and Window partitionSpec is empty.
+            val existWindowGroupLimit =
+            df.withColumn("rn", row_number().over(window3))
+              .limit(10)
+              .filter("rn < 5")
+              .queryExecution.optimizedPlan.exists {
+              case _: WindowGroupLimit => true
+              case _ => false
+            }
+            assert(!existWindowGroupLimit)
           }
         }
       }

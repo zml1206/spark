@@ -86,7 +86,7 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
         SpecifiedWindowFrame(_, UnboundedPreceding, CurrentRow))), _)
           if !windowFunction.isInstanceOf[SizeBasedWindowFunction] &&
             // LimitPushDownThroughWindow have better performance than WindowGroupLimit if the
-            // window function is RowNumber and Window partitionSpec is empty.
+            // window function is rank-like and Window partitionSpec is empty.
             (!support(windowFunction) || window.partitionSpec.nonEmpty) => true
         case _ => false
       }
