@@ -338,4 +338,29 @@ class InferWindowGroupLimitSuite extends PlanTest {
         WithoutOptimize.execute(correctAnswer1.analyze))
     }
   }
+
+  test("Insert window group limit node for partitionSpec is not empty and all the orderSpec are " +
+    "foldable and all the window expressions are RowFrame with limit") {
+    val originalQuery =
+      testRelation
+        .select(a, b, c,
+          windowExpr(RowNumber(),
+            windowSpec(a :: Nil, Literal(1).desc :: Nil, windowFrame)).as("rn1"),
+          windowExpr(Rank(Literal(1) :: Nil),
+            windowSpec(a :: Nil, Literal(1).desc :: Nil, windowFrame)).as("rn2"))
+        .limit(1)
+
+    val correctAnswer =
+      testRelation
+        .windowGroupLimit(a :: Nil, Literal(1).desc :: Nil, RowNumber(), 1)
+        .select(a, b, c,
+          windowExpr(RowNumber(),
+            windowSpec(a :: Nil, Literal(1).desc :: Nil, windowFrame)).as("rn1"),
+          windowExpr(Rank(Literal(1) :: Nil),
+            windowSpec(a :: Nil, Literal(1).desc :: Nil, windowFrame)).as("rn2"))
+        .limit(1)
+    comparePlans(
+      Optimize.execute(originalQuery.analyze),
+      WithoutOptimize.execute(correctAnswer.analyze))
+  }
 }
