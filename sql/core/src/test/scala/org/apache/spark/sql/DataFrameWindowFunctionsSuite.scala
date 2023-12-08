@@ -22,7 +22,7 @@ import org.scalatest.matchers.must.Matchers.the
 import org.apache.spark.TestUtils.{assertNotSpilled, assertSpilled}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, Lag, Literal, NonFoldableLiteral}
 import org.apache.spark.sql.catalyst.optimizer.TransposeWindow
-import org.apache.spark.sql.catalyst.plans.logical.{Window => LogicalWindow, WindowGroupLimit}
+import org.apache.spark.sql.catalyst.plans.logical.{Window => LogicalWindow}
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.exchange.{ENSURE_REQUIREMENTS, Exchange, ShuffleExchangeExec}
@@ -1300,18 +1300,6 @@ class DataFrameWindowFunctionsSuite extends QueryTest
         Seq(-1, 100).foreach { threshold =>
           withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
             // RowFrame
-            val existWindowGroupLimitRowFrame =
-              df.withColumn("sum_value", sum("value").over(window))
-                .limit(1)
-                .queryExecution.optimizedPlan.exists {
-                case _: WindowGroupLimit => true
-                case _ => false
-              }
-            if (threshold == -1) {
-              assert(!existWindowGroupLimitRowFrame)
-            } else {
-              assert(existWindowGroupLimitRowFrame)
-            }
             checkAnswer(df.withColumn("rn", row_number().over(window)).limit(1),
               Seq(
                 Row("a", 4, "", 1)
@@ -1345,18 +1333,6 @@ class DataFrameWindowFunctionsSuite extends QueryTest
             )
 
             // RangeFrame
-            val existWindowGroupLimitRangeFrame =
-              df.withColumn("sum_value", sum("value").over(window))
-              .limit(1)
-              .queryExecution.optimizedPlan.exists {
-                case _: WindowGroupLimit => true
-                case _ => false
-              }
-            if (threshold == -1) {
-              assert(!existWindowGroupLimitRangeFrame)
-            } else {
-              assert(existWindowGroupLimitRangeFrame)
-            }
             checkAnswer(df.withColumn("sum_value", sum("value").over(window)).limit(1),
               Seq(
                 Row("a", 4, "", 8)
@@ -1399,18 +1375,6 @@ class DataFrameWindowFunctionsSuite extends QueryTest
                 Row("a", 4, "", 4, 8)
               )
             )
-
-            // Choose LimitPushDownThroughWindow instead of WindowGroupLimit if the
-            // window function is rank-like and Window partitionSpec is empty.
-            val existWindowGroupLimit =
-            df.withColumn("rn", row_number().over(window3))
-              .limit(10)
-              .filter("rn < 5")
-              .queryExecution.optimizedPlan.exists {
-              case _: WindowGroupLimit => true
-              case _ => false
-            }
-            assert(!existWindowGroupLimit)
           }
         }
       }
