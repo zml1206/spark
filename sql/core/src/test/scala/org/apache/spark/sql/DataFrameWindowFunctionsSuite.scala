@@ -1296,6 +1296,10 @@ class DataFrameWindowFunctionsSuite extends QueryTest
     val window3 = Window.orderBy($"order".asc_nulls_first)
     val rowsWindow = window.rowsBetween(Window.unboundedPreceding, Window.currentRow)
     val rangeWindow = window.rangeBetween(Window.unboundedPreceding, Window.currentRow)
+    val rowsWindow2 = window2.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+    val rangeWindow2 = window2.rangeBetween(Window.unboundedPreceding, Window.currentRow)
+    val rowsWindow3 = window3.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+    val rangeWindow3 = window3.rangeBetween(Window.unboundedPreceding, Window.currentRow)
 
     Seq(-1, 100).foreach { threshold =>
       withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
@@ -1373,18 +1377,34 @@ class DataFrameWindowFunctionsSuite extends QueryTest
             Row("a", 4, "", 4, 8)
           )
         )
-
         checkAnswer(
-          df.withColumn("sum_value1", sum("value").over(rowsWindow))
-            .withColumn("sum_value2", sum("value").over(rangeWindow)).limit(7),
+          df.withColumn("sum_value1", sum("value").over(rowsWindow2))
+            .withColumn("sum_value2", sum("value").over(rangeWindow2)).limit(7),
           Seq(
-            Row("a", 0, "c", 8, 8),
-            Row("a", 1, "x", 9, 9),
-            Row("a", 2, "y", 11, 11),
-            Row("a", 3, "z", 14, 14),
-            Row("a", 4, "", 4, 8),
-            Row("a", 4, "", 8, 8),
-            Row("b", 1, "h", 1, 1)
+            Row("a", 0, "c", 6, 6),
+            Row("a", 1, "x", 6, 6),
+            Row("a", 2, "y", 5, 5),
+            Row("a", 3, "z", 3, 3),
+            Row("a", 4, "", 10, 14),
+            Row("a", 4, "", 14, 14),
+            Row("b", 1, "n", 1, 1)
+          )
+        )
+        checkAnswer(
+          df.withColumn("sum_value1", sum("value").over(rowsWindow3))
+            .withColumn("sum_value2", sum("value").over(rangeWindow3)).limit(11),
+          Seq(
+            Row("a", 0, "c", 11, 11),
+            Row("a", 1, "x", 14, 14),
+            Row("a", 2, "y", 16, 16),
+            Row("a", 3, "z", 19, 20),
+            Row("a", 4, "", 10, 10),
+            Row("a", 4, "", 6, 10),
+            Row("b", 1, "h", 12, 12),
+            Row("b", 1, "n", 13, 13),
+            Row("c", 1, "a", 11, 11),
+            Row("c", 1, "z", 20, 20),
+            Row("c", 2, nullStr, 2, 2)
           )
         )
       }
