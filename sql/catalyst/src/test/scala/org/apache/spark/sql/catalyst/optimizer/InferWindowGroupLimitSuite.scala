@@ -340,7 +340,7 @@ class InferWindowGroupLimitSuite extends PlanTest {
     }
   }
 
-  test("Insert window group limit node for cumulative aggregation with limit") {
+  test("Insert window group limit node for limit outside of cumulative aggregation window") {
     val originalQuery =
       testRelation
         .select(a, b, c,
@@ -360,7 +360,8 @@ class InferWindowGroupLimitSuite extends PlanTest {
       WithoutOptimize.execute(correctAnswer.analyze))
   }
 
-  test("Insert window group limit node for partitionSpec is not empty and rank-like with limit") {
+  test("Insert window group limit node for partitionSpec is not empty and limit outside of" +
+    " rank-like window") {
     val originalQuery =
       testRelation
         .select(a, b, c,
@@ -380,8 +381,8 @@ class InferWindowGroupLimitSuite extends PlanTest {
       WithoutOptimize.execute(correctAnswer.analyze))
   }
 
-  test("Insert window group limit node for partitionSpec is not empty and all the orderSpec are " +
-    "foldable and all the window expressions are RowFrame with limit") {
+  test("Insert window group limit node for limit outside of window which partitionSpec is not" +
+    " empty and all orderSpec are foldable and all windowFrame are RowFrame") {
     val originalQuery =
       testRelation
         .select(a, b, c,
@@ -405,9 +406,8 @@ class InferWindowGroupLimitSuite extends PlanTest {
       WithoutOptimize.execute(correctAnswer.analyze))
   }
 
-  test("Limit unsupported") {
-    // unsupported all the orderSpec are foldable and window expressions exists RangeFrame
-    val originalQuery1 =
+  test("Unsupported all orderSpec are foldable and windowFrames exists RangeFrame") {
+    val originalQuery =
       testRelation
         .select(a, b, c,
           windowExpr(RowNumber(),
@@ -416,29 +416,31 @@ class InferWindowGroupLimitSuite extends PlanTest {
             windowSpec(a :: Nil, Literal(1).desc :: Nil, windowRangeFrame)).as("s"))
         .limit(1)
     comparePlans(
-      Optimize.execute(originalQuery1.analyze),
-      WithoutOptimize.execute(originalQuery1.analyze))
+      Optimize.execute(originalQuery.analyze),
+      WithoutOptimize.execute(originalQuery.analyze))
+  }
 
-    // unsupported SizeBasedWindowFunction
-    val originalQuery2 =
+  test("Unsupported SizeBasedWindowFunction") {
+    val originalQuery =
       testRelation
         .select(a, b, c,
           windowExpr(new NTile(),
             windowSpec(a :: Nil, c.desc :: Nil, windowRowFrame)).as("nt"))
         .limit(1)
     comparePlans(
-      Optimize.execute(originalQuery2.analyze),
-      WithoutOptimize.execute(originalQuery2.analyze))
+      Optimize.execute(originalQuery.analyze),
+      WithoutOptimize.execute(originalQuery.analyze))
+  }
 
-    // unsupported partitionSpec is empty and rank-like with limit
-    val originalQuery3 =
+  test("Unsupported partitionSpec is empty and all window functions are rank-like") {
+    val originalQuery =
       testRelation
         .select(a, b, c,
           windowExpr(RowNumber(),
             windowSpec(Nil, c.desc :: Nil, windowRowFrame)).as("rn"))
         .limit(1)
     comparePlans(
-      Optimize.execute(originalQuery3.analyze),
-      WithoutOptimize.execute(originalQuery3.analyze))
+      Optimize.execute(originalQuery.analyze),
+      WithoutOptimize.execute(originalQuery.analyze))
   }
 }

@@ -73,14 +73,17 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
   }
 
   /**
-   * All window expressions should not have SizeBasedWindowFunction, all lower/upper of
-   * specifiedWindowFrame is UnboundedPreceding/CurrentRow, and window orderSpec is not foldable,
-   * so that we can safely do the early stop.
+   * Whether support inferring WindowGroupLimit from Limit outside of Window. Check if:
+   * 1. The window orderSpec exists unfoldable one or all window expressions should use the same
+   *  expanding window.
+   * 2. All window expressions should not have SizeBasedWindowFunction.
+   * 3. The Limit could not be pushed down through Window.
    */
   private def limitSupport(limit: Int, window: Window): Boolean =
     limit <= conf.windowGroupLimitThreshold && window.child.maxRows.forall(_ > limit) &&
       !window.child.isInstanceOf[WindowGroupLimit] &&
-      (window.orderSpec.exists(!_.child.foldable) || window.windowExpressions.forall(isRowFrame)) &&
+      (window.orderSpec.exists(!_.child.foldable) ||
+        window.windowExpressions.forall(isExpandingWindow)) &&
       window.windowExpressions.forall {
         case Alias(WindowExpression(windowFunction, WindowSpecDefinition(_, _,
         SpecifiedWindowFrame(_, UnboundedPreceding, CurrentRow))), _)
@@ -91,16 +94,10 @@ object InferWindowGroupLimit extends Rule[LogicalPlan] with PredicateHelper {
         case _ => false
       }
 
-  private def isRowFrame(windowExpression: NamedExpression): Boolean = windowExpression match {
-    case Alias(WindowExpression(_, WindowSpecDefinition(_, _,
-    SpecifiedWindowFrame(RowFrame, UnboundedPreceding, CurrentRow))), _) => true
-    case _ => false
-  }
-
   private def selectRankLikeFunction(windowExpressions: Seq[NamedExpression]): Expression =
     // If windowExpressions all are RowFrame, choose SimpleLimitIterator,
     // else RankLimitIterator to obtain enough rows for ensure data accuracy.
-    if (windowExpressions.forall(isRowFrame)) {
+    if (windowExpressions.forall(isExpandingWindow)) {
       new RowNumber
     } else {
       new Rank

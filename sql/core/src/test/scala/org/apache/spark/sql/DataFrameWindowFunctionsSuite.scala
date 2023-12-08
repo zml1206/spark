@@ -1276,7 +1276,7 @@ class DataFrameWindowFunctionsSuite extends QueryTest
     )
   }
 
-  test("SPARK-46228: Insert window group limit node for cumulative aggregation with limit") {
+  test("SPARK-46228: Insert window group limit node for limit outside of window") {
 
     val nullStr: String = null
     val df = Seq(
@@ -1294,89 +1294,99 @@ class DataFrameWindowFunctionsSuite extends QueryTest
     val window = Window.partitionBy($"key").orderBy($"order".asc_nulls_first)
     val window2 = Window.partitionBy($"key").orderBy($"order".desc_nulls_first)
     val window3 = Window.orderBy($"order".asc_nulls_first)
+    val rowsWindow = window.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+    val rangeWindow = window.rangeBetween(Window.unboundedPreceding, Window.currentRow)
 
-    Seq(true, false).foreach { enableEvaluator =>
-      withSQLConf(SQLConf.USE_PARTITION_EVALUATOR.key -> enableEvaluator.toString) {
-        Seq(-1, 100).foreach { threshold =>
-          withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
-            // RowFrame
-            checkAnswer(df.withColumn("rn", row_number().over(window)).limit(1),
-              Seq(
-                Row("a", 4, "", 1)
-              )
-            )
-            checkAnswer(df.withColumn("rn", rank().over(window2)).limit(7),
-              Seq(
-                Row("a", 0, "c", 4),
-                Row("a", 1, "x", 3),
-                Row("a", 2, "y", 2),
-                Row("a", 3, "z", 1),
-                Row("a", 4, "", 5),
-                Row("a", 4, "", 5),
-                Row("b", 1, "n", 1)
-              )
-            )
-            checkAnswer(df.withColumn("rn", dense_rank().over(window3)).limit(11),
-              Seq(
-                Row("a", 0, "c", 4),
-                Row("a", 1, "x", 7),
-                Row("a", 2, "y", 8),
-                Row("a", 3, "z", 9),
-                Row("a", 4, "", 2),
-                Row("a", 4, "", 2),
-                Row("b", 1, "h", 5),
-                Row("b", 1, "n", 6),
-                Row("c", 1, "a", 3),
-                Row("c", 1, "z", 9),
-                Row("c", 2, nullStr, 1)
-              )
-            )
+    Seq(-1, 100).foreach { threshold =>
+      withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
+        // RowFrame
+        checkAnswer(df.withColumn("rn", row_number().over(window)).limit(1),
+          Seq(
+            Row("a", 4, "", 1)
+          )
+        )
+        checkAnswer(df.withColumn("rn", rank().over(window2)).limit(7),
+          Seq(
+            Row("a", 0, "c", 4),
+            Row("a", 1, "x", 3),
+            Row("a", 2, "y", 2),
+            Row("a", 3, "z", 1),
+            Row("a", 4, "", 5),
+            Row("a", 4, "", 5),
+            Row("b", 1, "n", 1)
+          )
+        )
+        checkAnswer(df.withColumn("rn", dense_rank().over(window3)).limit(11),
+          Seq(
+            Row("a", 0, "c", 4),
+            Row("a", 1, "x", 7),
+            Row("a", 2, "y", 8),
+            Row("a", 3, "z", 9),
+            Row("a", 4, "", 2),
+            Row("a", 4, "", 2),
+            Row("b", 1, "h", 5),
+            Row("b", 1, "n", 6),
+            Row("c", 1, "a", 3),
+            Row("c", 1, "z", 9),
+            Row("c", 2, nullStr, 1)
+          )
+        )
 
-            // RangeFrame
-            checkAnswer(df.withColumn("sum_value", sum("value").over(window)).limit(1),
-              Seq(
-                Row("a", 4, "", 8)
-              )
-            )
-            checkAnswer(df.withColumn("sum_value", sum("value").over(window2)).limit(7),
-              Seq(
-                Row("a", 0, "c", 6),
-                Row("a", 1, "x", 6),
-                Row("a", 2, "y", 5),
-                Row("a", 3, "z", 3),
-                Row("a", 4, "", 14),
-                Row("a", 4, "", 14),
-                Row("b", 1, "n", 1)
-              )
-            )
-            checkAnswer(df.withColumn("sum_value", sum("value").over(window3)).limit(11),
-              Seq(
-                Row("a", 0, "c", 11),
-                Row("a", 1, "x", 14),
-                Row("a", 2, "y", 16),
-                Row("a", 3, "z", 20),
-                Row("a", 4, "", 10),
-                Row("a", 4, "", 10),
-                Row("b", 1, "h", 12),
-                Row("b", 1, "n", 13),
-                Row("c", 1, "a", 11),
-                Row("c", 1, "z", 20),
-                Row("c", 2, nullStr, 2)
-              )
-            )
+        // RangeFrame
+        checkAnswer(df.withColumn("sum_value", sum("value").over(window)).limit(1),
+          Seq(
+            Row("a", 4, "", 8)
+          )
+        )
+        checkAnswer(df.withColumn("sum_value", sum("value").over(window2)).limit(7),
+          Seq(
+            Row("a", 0, "c", 6),
+            Row("a", 1, "x", 6),
+            Row("a", 2, "y", 5),
+            Row("a", 3, "z", 3),
+            Row("a", 4, "", 14),
+            Row("a", 4, "", 14),
+            Row("b", 1, "n", 1)
+          )
+        )
+        checkAnswer(df.withColumn("sum_value", sum("value").over(window3)).limit(11),
+          Seq(
+            Row("a", 0, "c", 11),
+            Row("a", 1, "x", 14),
+            Row("a", 2, "y", 16),
+            Row("a", 3, "z", 20),
+            Row("a", 4, "", 10),
+            Row("a", 4, "", 10),
+            Row("b", 1, "h", 12),
+            Row("b", 1, "n", 13),
+            Row("c", 1, "a", 11),
+            Row("c", 1, "z", 20),
+            Row("c", 2, nullStr, 2)
+          )
+        )
 
-            // Both RowFrame and RangeFrame exist
-            checkAnswer(
-              df.withColumn("sum_value1", sum("value")
-                .over(window.rowsBetween(Window.unboundedPreceding, Window.currentRow)))
-              .withColumn("sum_value2", sum("value")
-                .over(window.rangeBetween(Window.unboundedPreceding, Window.currentRow))).limit(1),
-              Seq(
-                Row("a", 4, "", 4, 8)
-              )
-            )
-          }
-        }
+        // Both RowFrame and RangeFrame exist
+        checkAnswer(
+          df.withColumn("sum_value1", sum("value").over(rowsWindow))
+            .withColumn("sum_value2", sum("value").over(rangeWindow)).limit(1),
+          Seq(
+            Row("a", 4, "", 4, 8)
+          )
+        )
+
+        checkAnswer(
+          df.withColumn("sum_value1", sum("value").over(rowsWindow))
+            .withColumn("sum_value2", sum("value").over(rangeWindow)).limit(7),
+          Seq(
+            Row("a", 0, "c", 8, 8),
+            Row("a", 1, "x", 9, 9),
+            Row("a", 2, "y", 11, 11),
+            Row("a", 3, "z", 14, 14),
+            Row("a", 4, "", 4, 8),
+            Row("a", 4, "", 8, 8),
+            Row("b", 1, "h", 1, 1)
+          )
+        )
       }
     }
   }
