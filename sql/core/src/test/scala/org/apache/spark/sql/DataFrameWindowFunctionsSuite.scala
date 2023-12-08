@@ -1389,6 +1389,17 @@ class DataFrameWindowFunctionsSuite extends QueryTest
               )
             )
 
+            // Both RowFrame and RangeFrame exist
+            checkAnswer(
+              df.withColumn("sum_value1", sum("value")
+                .over(window.rowsBetween(Window.unboundedPreceding, Window.currentRow)))
+              .withColumn("sum_value2", sum("value")
+                .over(window.rangeBetween(Window.unboundedPreceding, Window.currentRow))).limit(1),
+              Seq(
+                Row("a", 4, "", 4, 8)
+              )
+            )
+
             // Choose LimitPushDownThroughWindow instead of WindowGroupLimit if the
             // window function is rank-like and Window partitionSpec is empty.
             val existWindowGroupLimit =
