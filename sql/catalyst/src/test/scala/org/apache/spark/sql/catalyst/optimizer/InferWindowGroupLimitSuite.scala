@@ -341,14 +341,14 @@ class InferWindowGroupLimitSuite extends PlanTest {
   }
 
   test("Insert window group limit node for limit outside of cumulative aggregation window") {
-    val originalQuery =
+    val originalQuery1 =
       testRelation
         .select(a, b, c,
           windowExpr(sum(b),
             windowSpec(a :: Nil, c.desc :: Nil, windowRangeFrame)).as("s"))
         .limit(1)
 
-    val correctAnswer =
+    val correctAnswer1 =
       testRelation
         .windowGroupLimit(a :: Nil, c.desc :: Nil, new Rank(), 1)
         .select(a, b, c,
@@ -356,8 +356,26 @@ class InferWindowGroupLimitSuite extends PlanTest {
             windowSpec(a :: Nil, c.desc :: Nil, windowRangeFrame)).as("s"))
         .limit(1)
     comparePlans(
-      Optimize.execute(originalQuery.analyze),
-      WithoutOptimize.execute(correctAnswer.analyze))
+      Optimize.execute(originalQuery1.analyze),
+      WithoutOptimize.execute(correctAnswer1.analyze))
+
+    val originalQuery2 =
+      testRelation
+        .select(a, b, c,
+          windowExpr(sum(b),
+            windowSpec(Nil, c.desc :: Nil, windowRangeFrame)).as("s"))
+        .limit(1)
+
+    val correctAnswer2 =
+      testRelation
+        .windowGroupLimit(Nil, c.desc :: Nil, new Rank(), 1)
+        .select(a, b, c,
+          windowExpr(sum(b),
+            windowSpec(Nil, c.desc :: Nil, windowRangeFrame)).as("s"))
+        .limit(1)
+    comparePlans(
+      Optimize.execute(originalQuery2.analyze),
+      WithoutOptimize.execute(correctAnswer2.analyze))
   }
 
   test("Insert window group limit node for partitionSpec is not empty and limit outside of" +
