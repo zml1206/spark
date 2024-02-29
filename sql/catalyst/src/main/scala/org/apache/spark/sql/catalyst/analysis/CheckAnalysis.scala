@@ -303,7 +303,11 @@ trait CheckAnalysis extends PredicateHelper with LookupCatalog with QueryErrorsB
               errorClass = "_LEGACY_ERROR_TEMP_2408",
               messageParameters = Map("w" -> w.toString))
 
-          case w @ WindowExpression(AggregateExpression(_, _, true, _, _), _) =>
+          // Distinct window function only support entire partition frame and
+          // growing frame, and Distinct fields can't all be foldable.
+          case w @ WindowExpression(AggregateExpression(f, _, true, _, _),
+            WindowSpecDefinition(_, _, frame: SpecifiedWindowFrame))
+             if f.children.forall(_.foldable) || frame.lower != UnboundedPreceding =>
             w.failAnalysis(
               errorClass = "_LEGACY_ERROR_TEMP_2409",
               messageParameters = Map("w" -> w.toString))

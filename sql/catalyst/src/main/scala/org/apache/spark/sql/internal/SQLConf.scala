@@ -2674,6 +2674,14 @@ object SQLConf {
       .intConf
       .createWithDefault(SHUFFLE_SPILL_NUM_ELEMENTS_FORCE_SPILL_THRESHOLD.defaultValue.get)
 
+  val DISTINCT_WINDOW_FUNCTION_MAX_VALUES = buildConf("spark.sql.window.distinctMaxValues")
+    .doc("When executing distinct window function, this is Maximum number of distinct values in " +
+      "a window frame, in order to avoid executor oom. If this value is zero or negative, " +
+      "there is no limit.")
+    .version("3.4.1")
+    .longConf
+    .createWithDefault(0)
+
   val SORT_MERGE_JOIN_EXEC_BUFFER_IN_MEMORY_THRESHOLD =
     buildConf("spark.sql.sortMergeJoinExec.buffer.in.memory.threshold")
       .internal()
@@ -4780,6 +4788,8 @@ class SQLConf extends Serializable with Logging {
   def sessionWindowBufferInMemoryThreshold: Int = getConf(SESSION_WINDOW_BUFFER_IN_MEMORY_THRESHOLD)
 
   def sessionWindowBufferSpillThreshold: Int = getConf(SESSION_WINDOW_BUFFER_SPILL_THRESHOLD)
+
+  def distinctWindowFunctionMaxValues: Long = getConf(DISTINCT_WINDOW_FUNCTION_MAX_VALUES)
 
   def sortMergeJoinExecBufferInMemoryThreshold: Int =
     getConf(SORT_MERGE_JOIN_EXEC_BUFFER_IN_MEMORY_THRESHOLD)
