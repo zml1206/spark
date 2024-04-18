@@ -78,6 +78,7 @@ abstract class Optimizer(catalogManager: CatalogManager)
         PushDownPredicates,
         PushDownLeftSemiAntiJoin,
         PushLeftSemiLeftAntiThroughJoin,
+        OptimizeJoinCondition,
         LimitPushDown,
         LimitPushDownThroughWindow,
         ColumnPruning,
