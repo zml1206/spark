@@ -22,6 +22,7 @@ import org.scalatest.matchers.must.Matchers.the
 import org.apache.spark.TestUtils.{assertNotSpilled, assertSpilled}
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, Lag, Literal, NonFoldableLiteral}
 import org.apache.spark.sql.catalyst.optimizer.TransposeWindow
+import org.apache.spark.sql.catalyst.plans.logical.{Window => LogicalWindow}
 import org.apache.spark.sql.catalyst.plans.physical.HashPartitioning
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
 import org.apache.spark.sql.execution.exchange.{ENSURE_REQUIREMENTS, Exchange, ShuffleExchangeExec}
@@ -1270,5 +1271,365 @@ class DataFrameWindowFunctionsSuite extends QueryTest
         Row(2, 1)
       )
     )
+  }
+
+  test("SPARK-42525: collapse two adjacent windows with the same partition/order in subquery") {
+    withTempView("t1") {
+      Seq((1, 1), (2, 2)).toDF("a", "b").createOrReplaceTempView("t1")
+      val df = sql(
+        """
+          |SELECT a, b, rk, row_number() OVER (PARTITION BY a ORDER BY b) AS rn
+          |FROM   (SELECT a, b, rank() OVER (PARTITION BY a ORDER BY b) AS rk
+          |        FROM t1) t2
+          |""".stripMargin)
+
+      val windows = df.queryExecution.optimizedPlan.collect { case w: LogicalWindow => w }
+      assert(windows.size === 1)
+    }
+  }
+
+    test("SPARK-37099: Insert window group limit node for top-k computation") {
+
+    val nullStr: String = null
+    val df = Seq(
+      ("a", 0, "c", 1.0),
+      ("a", 1, "x", 2.0),
+      ("a", 2, "y", 3.0),
+      ("a", 3, "z", -1.0),
+      ("a", 4, "", 2.0),
+      ("a", 4, "", 2.0),
+      ("b", 1, "h", Double.NaN),
+      ("b", 1, "n", Double.PositiveInfinity),
+      ("c", 1, "z", -2.0),
+      ("c", 1, "a", -4.0),
+      ("c", 2, nullStr, 5.0)).toDF("key", "value", "order", "value2")
+
+    val window = Window.partitionBy($"key").orderBy($"order".asc_nulls_first)
+    val window2 = Window.partitionBy($"key").orderBy($"order".desc_nulls_first)
+    val window3 = Window.orderBy($"order".asc_nulls_first)
+
+    Seq(-1, 100).foreach { threshold =>
+      withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
+        Seq($"rn" === 0, $"rn" < 1, $"rn" <= 0).foreach { condition =>
+          checkAnswer(df.withColumn("rn", row_number().over(window)).where(condition),
+            Seq.empty[Row]
+          )
+        }
+
+        Seq($"rn" === 1, $"rn" < 2, $"rn" <= 1).foreach { condition =>
+          checkAnswer(df.withColumn("rn", row_number().over(window)).where(condition),
+            Seq(
+              Row("a", 4, "", 2.0, 1),
+              Row("b", 1, "h", Double.NaN, 1),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", rank().over(window)).where(condition),
+            Seq(
+              Row("a", 4, "", 2.0, 1),
+              Row("a", 4, "", 2.0, 1),
+              Row("b", 1, "h", Double.NaN, 1),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", dense_rank().over(window)).where(condition),
+            Seq(
+              Row("a", 4, "", 2.0, 1),
+              Row("a", 4, "", 2.0, 1),
+              Row("b", 1, "h", Double.NaN, 1),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", row_number().over(window3)).where(condition),
+            Seq(
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", rank().over(window3)).where(condition),
+            Seq(
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", dense_rank().over(window3)).where(condition),
+            Seq(
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+        }
+
+        Seq($"rn" < 3, $"rn" <= 2).foreach { condition =>
+          checkAnswer(df.withColumn("rn", row_number().over(window)).where(condition),
+            Seq(
+              Row("a", 4, "", 2.0, 1),
+              Row("a", 4, "", 2.0, 2),
+              Row("b", 1, "h", Double.NaN, 1),
+              Row("b", 1, "n", Double.PositiveInfinity, 2),
+              Row("c", 1, "a", -4.0, 2),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", rank().over(window)).where(condition),
+            Seq(
+              Row("a", 4, "", 2.0, 1),
+              Row("a", 4, "", 2.0, 1),
+              Row("b", 1, "h", Double.NaN, 1),
+              Row("b", 1, "n", Double.PositiveInfinity, 2),
+              Row("c", 1, "a", -4.0, 2),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", dense_rank().over(window)).where(condition),
+            Seq(
+              Row("a", 0, "c", 1.0, 2),
+              Row("a", 4, "", 2.0, 1),
+              Row("a", 4, "", 2.0, 1),
+              Row("b", 1, "h", Double.NaN, 1),
+              Row("b", 1, "n", Double.PositiveInfinity, 2),
+              Row("c", 1, "a", -4.0, 2),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", row_number().over(window3)).where(condition),
+            Seq(
+              Row("a", 4, "", 2.0, 2),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", rank().over(window3)).where(condition),
+            Seq(
+              Row("a", 4, "", 2.0, 2),
+              Row("a", 4, "", 2.0, 2),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+
+          checkAnswer(df.withColumn("rn", dense_rank().over(window3)).where(condition),
+            Seq(
+              Row("a", 4, "", 2.0, 2),
+              Row("a", 4, "", 2.0, 2),
+              Row("c", 2, null, 5.0, 1)
+            )
+          )
+        }
+
+        val condition = $"rn" === 2 && $"value2" > 0.5
+        checkAnswer(df.withColumn("rn", row_number().over(window)).where(condition),
+          Seq(
+            Row("a", 4, "", 2.0, 2),
+            Row("b", 1, "n", Double.PositiveInfinity, 2)
+          )
+        )
+
+        checkAnswer(df.withColumn("rn", rank().over(window)).where(condition),
+          Seq(
+            Row("b", 1, "n", Double.PositiveInfinity, 2)
+          )
+        )
+
+        checkAnswer(df.withColumn("rn", dense_rank().over(window)).where(condition),
+          Seq(
+            Row("a", 0, "c", 1.0, 2),
+            Row("b", 1, "n", Double.PositiveInfinity, 2)
+          )
+        )
+
+        val multipleRowNumbers = df
+          .withColumn("rn", row_number().over(window))
+          .withColumn("rn2", row_number().over(window))
+          .where('rn < 2 && 'rn2 < 3)
+        checkAnswer(multipleRowNumbers,
+          Seq(
+            Row("a", 4, "", 2.0, 1, 1),
+            Row("b", 1, "h", Double.NaN, 1, 1),
+            Row("c", 2, null, 5.0, 1, 1)
+          )
+        )
+
+        val multipleRanks = df
+          .withColumn("rn", rank().over(window))
+          .withColumn("rn2", rank().over(window))
+          .where('rn < 2 && 'rn2 < 3)
+        checkAnswer(multipleRanks,
+          Seq(
+            Row("a", 4, "", 2.0, 1, 1),
+            Row("a", 4, "", 2.0, 1, 1),
+            Row("b", 1, "h", Double.NaN, 1, 1),
+            Row("c", 2, null, 5.0, 1, 1)
+          )
+        )
+
+        val multipleDenseRanks = df
+          .withColumn("rn", dense_rank().over(window))
+          .withColumn("rn2", dense_rank().over(window))
+          .where('rn < 2 && 'rn2 < 3)
+        checkAnswer(multipleDenseRanks,
+          Seq(
+            Row("a", 4, "", 2.0, 1, 1),
+            Row("a", 4, "", 2.0, 1, 1),
+            Row("b", 1, "h", Double.NaN, 1, 1),
+            Row("c", 2, null, 5.0, 1, 1)
+          )
+        )
+
+        val multipleWindows = df
+          .withColumn("rn2", row_number().over(window2))
+          .withColumn("rn", row_number().over(window))
+          .where('rn < 2 && 'rn2 < 3)
+        checkAnswer(multipleWindows,
+          Seq(
+            Row("b", 1, "h", Double.NaN, 2, 1),
+            Row("c", 2, null, 5.0, 1, 1)
+          )
+        )
+      }
+    }
+  }
+
+  test("SPARK-45543: InferWindowGroupLimit causes bug " +
+    "if the other window functions haven't the same window frame as the rank-like functions") {
+    val df = Seq(
+      (1, "Dave", 1, 2020),
+      (2, "Dave", 1, 2021),
+      (3, "Dave", 2, 2022),
+      (4, "Dave", 3, 2023),
+      (5, "Dave", 3, 2024),
+      (6, "Mark", 2, 2022),
+      (7, "Mark", 3, 2023),
+      (8, "Mark", 3, 2024),
+      (9, "Amy", 6, 2021),
+      (10, "Amy", 5, 2022),
+      (11, "Amy", 6, 2023),
+      (12, "Amy", 7, 2024),
+      (13, "John", 7, 2024)).toDF("id", "name", "score", "year")
+
+    val window = Window.partitionBy($"year").orderBy($"score".desc)
+    val window2 = window.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+    val window3 = window.rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+
+    Seq(-1, 100).foreach { threshold =>
+      withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
+        // The other window functions have the same window frame as the rank-like functions.
+        // df2, df3 and df4 can apply InferWindowGroupLimit
+        val df2 = df
+          .withColumn("rn", row_number().over(window))
+          .withColumn("all_scores", collect_list($"score").over(window2))
+          .sort($"year")
+
+        checkAnswer(df2.filter("rn=1"), Seq(
+          Row(1, "Dave", 1, 2020, 1, Array(1)),
+          Row(9, "Amy", 6, 2021, 1, Array(6)),
+          Row(10, "Amy", 5, 2022, 1, Array(5)),
+          Row(11, "Amy", 6, 2023, 1, Array(6)),
+          Row(12, "Amy", 7, 2024, 1, Array(7))
+        ))
+
+        val df3 = df
+          .withColumn("rank", rank().over(window))
+          .withColumn("all_scores", collect_list($"score").over(window2))
+          .sort($"year")
+
+        checkAnswer(df3.filter("rank=2"), Seq(
+          Row(2, "Dave", 1, 2021, 2, Array(6, 1)),
+          Row(3, "Dave", 2, 2022, 2, Array(5, 2)),
+          Row(6, "Mark", 2, 2022, 2, Array(5, 2, 2)),
+          Row(4, "Dave", 3, 2023, 2, Array(6, 3)),
+          Row(7, "Mark", 3, 2023, 2, Array(6, 3, 3))
+        ))
+
+        val df4 = df
+          .withColumn("rank", dense_rank().over(window))
+          .withColumn("all_scores", collect_list($"score").over(window2))
+          .sort($"year")
+
+        checkAnswer(df4.filter("rank=2"), Seq(
+          Row(2, "Dave", 1, 2021, 2, Array(6, 1)),
+          Row(3, "Dave", 2, 2022, 2, Array(5, 2)),
+          Row(6, "Mark", 2, 2022, 2, Array(5, 2, 2)),
+          Row(4, "Dave", 3, 2023, 2, Array(6, 3)),
+          Row(7, "Mark", 3, 2023, 2, Array(6, 3, 3)),
+          Row(5, "Dave", 3, 2024, 2, Array(7, 7, 3)),
+          Row(8, "Mark", 3, 2024, 2, Array(7, 7, 3, 3))
+        ))
+
+        // The other window functions haven't the same window frame as the rank-like functions.
+        // df5, df6 and df7 cannot apply InferWindowGroupLimit
+        val df5 = df
+          .withColumn("rn", row_number().over(window))
+          .withColumn("all_scores", collect_list($"score").over(window3))
+          .sort($"year")
+
+        checkAnswer(df5.filter("rn=1"), Seq(
+          Row(1, "Dave", 1, 2020, 1, Array(1)),
+          Row(9, "Amy", 6, 2021, 1, Array(6, 1)),
+          Row(10, "Amy", 5, 2022, 1, Array(5, 2, 2)),
+          Row(11, "Amy", 6, 2023, 1, Array(6, 3, 3)),
+          Row(12, "Amy", 7, 2024, 1, Array(7, 7, 3, 3))
+        ))
+
+        val df6 = df
+          .withColumn("rank", rank().over(window))
+          .withColumn("all_scores", collect_list($"score").over(window3))
+          .sort($"year")
+
+        checkAnswer(df6.filter("rank=2"), Seq(
+          Row(2, "Dave", 1, 2021, 2, Array(6, 1)),
+          Row(3, "Dave", 2, 2022, 2, Array(5, 2, 2)),
+          Row(6, "Mark", 2, 2022, 2, Array(5, 2, 2)),
+          Row(4, "Dave", 3, 2023, 2, Array(6, 3, 3)),
+          Row(7, "Mark", 3, 2023, 2, Array(6, 3, 3))
+        ))
+
+        val df7 = df
+          .withColumn("rank", dense_rank().over(window))
+          .withColumn("all_scores", collect_list($"score").over(window3))
+          .sort($"year")
+
+        checkAnswer(df7.filter("rank=2"), Seq(
+          Row(2, "Dave", 1, 2021, 2, Array(6, 1)),
+          Row(3, "Dave", 2, 2022, 2, Array(5, 2, 2)),
+          Row(6, "Mark", 2, 2022, 2, Array(5, 2, 2)),
+          Row(4, "Dave", 3, 2023, 2, Array(6, 3, 3)),
+          Row(7, "Mark", 3, 2023, 2, Array(6, 3, 3)),
+          Row(5, "Dave", 3, 2024, 2, Array(7, 7, 3, 3)),
+          Row(8, "Mark", 3, 2024, 2, Array(7, 7, 3, 3))
+        ))
+      }
+    }
+  }
+
+  test("SPARK-46941: Can't insert window group limit node for top-k computation if contains " +
+    "SizeBasedWindowFunction") {
+    val df = Seq(
+      (1, "Dave", 1, 2020),
+      (2, "Mark", 2, 2020),
+      (3, "Amy", 3, 2020),
+      (4, "Dave", 1, 2021),
+      (5, "Mark", 2, 2021),
+      (6, "Amy", 3, 2021),
+      (7, "John", 4, 2021)).toDF("id", "name", "score", "year")
+
+    val window = Window.partitionBy($"year").orderBy($"score".desc)
+
+    Seq(-1, 100).foreach { threshold =>
+      withSQLConf(SQLConf.WINDOW_GROUP_LIMIT_THRESHOLD.key -> threshold.toString) {
+        val df2 = df
+          .withColumn("rank", rank().over(window))
+          .withColumn("percent_rank", percent_rank().over(window))
+          .sort($"year")
+        checkAnswer(df2.filter("rank=2"), Seq(
+          Row(2, "Mark", 2, 2020, 2, 0.5),
+          Row(6, "Amy", 3, 2021, 2, 0.3333333333333333)
+        ))
+      }
+    }
   }
 }

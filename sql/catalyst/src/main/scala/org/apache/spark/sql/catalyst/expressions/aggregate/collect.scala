@@ -20,6 +20,7 @@ package org.apache.spark.sql.catalyst.expressions.aggregate
 import scala.collection.generic.Growable
 import scala.collection.mutable
 
+import org.apache.spark.SparkException
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.DataTypeMismatch
@@ -27,6 +28,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.trees.UnaryLike
 import org.apache.spark.sql.catalyst.util.{ArrayData, GenericArrayData, TypeUtils}
 import org.apache.spark.sql.errors.QueryErrorsBase
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.util.BoundedPriorityQueue
 
@@ -56,6 +58,11 @@ abstract class Collect[T <: Growable[Any] with Iterable[Any]] extends TypedImper
     // See: org.apache.hadoop.hive.ql.udf.generic.GenericUDAFMkCollectionEvaluator
     if (value != null) {
       buffer += convertToBufferElement(value)
+      if (buffer.size > SQLConf.get.maxCollectSize) {
+        throw new SparkException(
+          "Too many elements in collect_set or collect_list. " +
+            s"The threshold is ${SQLConf.get.maxCollectSize}")
+      }
     }
     buffer
   }

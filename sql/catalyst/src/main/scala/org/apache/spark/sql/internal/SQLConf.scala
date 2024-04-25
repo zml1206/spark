@@ -585,6 +585,13 @@ object SQLConf {
     .checkValue(_ > 0, "value should be positive")
     .createWithDefault(1)
 
+  val BROADCASTJOIN_MEMORY_FRACTION = buildConf("spark.sql.broadcastJoin.memory.fraction")
+    .doc("Fraction of driver memory to broadcast. If the size in bytes of a broadcast table " +
+      "exceeds Fraction of driver memory, the job will fail.")
+    .version("3.0.1")
+    .doubleConf
+    .createWithDefault(0.5)
+
   val LIMIT_SCALE_UP_FACTOR = buildConf("spark.sql.limit.scaleUpFactor")
     .internal()
     .doc("Minimal increase rate in number of partitions between attempts when executing a take " +
@@ -2645,6 +2652,17 @@ object SQLConf {
       .intConf
       .createWithDefault(SHUFFLE_SPILL_NUM_ELEMENTS_FORCE_SPILL_THRESHOLD.defaultValue.get)
 
+  val WINDOW_GROUP_LIMIT_THRESHOLD =
+    buildConf("spark.sql.optimizer.windowGroupLimitThreshold")
+      .internal()
+      .doc("Threshold for triggering `InsertWindowGroupLimit`. " +
+        "0 means the output results is empty. -1 means disabling the optimization.")
+      .version("3.5.0")
+      .intConf
+      .checkValue(_ >= -1,
+        "The threshold of window group limit must be -1, 0 or positive integer.")
+      .createWithDefault(1000)
+
   val SESSION_WINDOW_BUFFER_IN_MEMORY_THRESHOLD =
     buildConf("spark.sql.sessionWindow.buffer.in.memory.threshold")
       .internal()
@@ -2664,6 +2682,14 @@ object SQLConf {
       .version("3.2.0")
       .intConf
       .createWithDefault(SHUFFLE_SPILL_NUM_ELEMENTS_FORCE_SPILL_THRESHOLD.defaultValue.get)
+
+  val DISTINCT_WINDOW_FUNCTION_MAX_VALUES = buildConf("spark.sql.window.distinctMaxValues")
+    .doc("When executing distinct window function, this is Maximum number of distinct values in " +
+      "a window frame, in order to avoid executor oom. If this value is zero or negative, " +
+      "there is no limit.")
+    .version("3.4.1")
+    .longConf
+    .createWithDefault(0)
 
   val SORT_MERGE_JOIN_EXEC_BUFFER_IN_MEMORY_THRESHOLD =
     buildConf("spark.sql.sortMergeJoinExec.buffer.in.memory.threshold")
@@ -4208,6 +4234,13 @@ object SQLConf {
       .booleanConf
       .createWithDefault(false)
 
+  val COLLECT_SIZE_LIMIT = buildConf("spark.sql.collect.sizeLimit")
+    .internal()
+    .doc("The max number of elements in collect_set or collect_list.")
+    .version("3.2.1")
+    .intConf
+    .createWithDefault(100000)
+
   /**
    * Holds information about keys that have been deprecated.
    *
@@ -4637,6 +4670,8 @@ class SQLConf extends Serializable with Logging {
 
   def limitInitialNumPartitions: Int = getConf(LIMIT_INITIAL_NUM_PARTITIONS)
 
+  def broadcastJoinMemoryFraction: Double = getConf(BROADCASTJOIN_MEMORY_FRACTION)
+
   def limitScaleUpFactor: Int = getConf(LIMIT_SCALE_UP_FACTOR)
 
   def advancedPartitionPredicatePushdownEnabled: Boolean =
@@ -4781,9 +4816,13 @@ class SQLConf extends Serializable with Logging {
 
   def windowExecBufferSpillThreshold: Int = getConf(WINDOW_EXEC_BUFFER_SPILL_THRESHOLD)
 
+  def windowGroupLimitThreshold: Int = getConf(WINDOW_GROUP_LIMIT_THRESHOLD)
+
   def sessionWindowBufferInMemoryThreshold: Int = getConf(SESSION_WINDOW_BUFFER_IN_MEMORY_THRESHOLD)
 
   def sessionWindowBufferSpillThreshold: Int = getConf(SESSION_WINDOW_BUFFER_SPILL_THRESHOLD)
+
+  def distinctWindowFunctionMaxValues: Long = getConf(DISTINCT_WINDOW_FUNCTION_MAX_VALUES)
 
   def sortMergeJoinExecBufferInMemoryThreshold: Int =
     getConf(SORT_MERGE_JOIN_EXEC_BUFFER_IN_MEMORY_THRESHOLD)
@@ -5039,6 +5078,8 @@ class SQLConf extends Serializable with Logging {
   def legacyNegativeIndexInArrayInsert: Boolean = {
     getConf(SQLConf.LEGACY_NEGATIVE_INDEX_IN_ARRAY_INSERT)
   }
+
+  def maxCollectSize: Int = getConf(SQLConf.COLLECT_SIZE_LIMIT)
 
   /** ********************** SQLConf functionality methods ************ */
 
