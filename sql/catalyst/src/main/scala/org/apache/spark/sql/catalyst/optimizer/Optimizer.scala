@@ -151,6 +151,9 @@ abstract class Optimizer(catalogManager: CatalogManager)
 
     val batches = (
     Batch("Finish Analysis", Once, FinishAnalysis) ::
+    // We must run this batch after `ReplaceExpressions`, as `RuntimeReplaceable` expression
+    // may produce `With` expressions that need to be rewritten.
+    Batch("Rewrite With expression", Once, RewriteWithExpression) ::
     //////////////////////////////////////////////////////////////////////////////////////////
     // Optimizer rules start here
     //////////////////////////////////////////////////////////////////////////////////////////
@@ -198,9 +201,11 @@ abstract class Optimizer(catalogManager: CatalogManager)
       RemoveLiteralFromGroupExpressions,
       RemoveRepetitionFromGroupExpressions) :: Nil ++
     operatorOptimizationBatch) :+
-    // We must run this batch after `ReplaceExpressions`, as `RuntimeReplaceable` expression
-    // may produce `With` expressions that need to be rewritten.
-    Batch("Rewrite With expression", Once, RewriteWithExpression) :+
+    // We must run this batch after `PushPredicateThroughNonJoin`, as
+    // `PushPredicateThroughNonJoin` may produce `With` expressions that need to be rewritten.
+    Batch("Rewrite With expression", Once,
+      RewriteWithExpression,
+      CollapseProject) :+
     Batch("Clean Up Temporary CTE Info", Once, CleanUpTempCTEInfo) :+
     // This batch rewrites plans after the operator optimization and
     // before any batches that depend on stats.

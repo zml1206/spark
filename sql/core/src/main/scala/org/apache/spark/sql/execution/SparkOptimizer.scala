@@ -62,6 +62,11 @@ class SparkOptimizer(
       RewriteDistinctAggregates) :+
     Batch("Pushdown Filters from PartitionPruning", fixedPoint,
       PushDownPredicates) :+
+    // We must run this batch after `PushPredicateThroughNonJoin`, as
+    // `PushPredicateThroughNonJoin` may produce `With` expressions that need to be rewritten.
+    Batch("Rewrite With expression", Once,
+      RewriteWithExpression,
+      CollapseProject) :+
     Batch("Cleanup filters that cannot be pushed down", Once,
       CleanupDynamicPruningFilters,
       // cleanup the unnecessary TrueLiteral predicates
@@ -85,6 +90,11 @@ class SparkOptimizer(
       PushPredicateThroughNonJoin,
       PushProjectionThroughLimit,
       RemoveNoopOperators) :+
+    // We must run this batch after `PushPredicateThroughNonJoin`, as
+    // `PushPredicateThroughNonJoin` may produce `With` expressions that need to be rewritten.
+    Batch("Rewrite With expression", Once,
+      RewriteWithExpression,
+      CollapseProject) :+
     Batch("Infer window group limit", Once,
       InferWindowGroupLimit,
       LimitPushDown,
