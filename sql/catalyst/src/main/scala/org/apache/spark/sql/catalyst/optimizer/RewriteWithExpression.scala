@@ -65,15 +65,17 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
         applyInternal(p, replaceMap)
     }
 
+    val collapseProject = CollapseProject.apply(rewriteWith)
     // With generated in the predicate pushdown has the origin attribute.
     // We need to replace the attribute of the original Alias to avoid secondary calculations.
+    // Replace attribute need after CollapseProject, otherwise illegal plans may be generated.
     if (replaceMap.nonEmpty) {
-      rewriteWith.transformAllExpressionsWithPruning(_.containsPattern(ALIAS)) {
+      collapseProject.transformAllExpressionsWithPruning(_.containsPattern(ALIAS)) {
         case alias: Alias if replaceMap.contains(alias.toAttribute) =>
           alias.withNewChildren(Seq(replaceMap(alias.toAttribute)))
       }
     } else {
-      rewriteWith
+      collapseProject
     }
   }
 

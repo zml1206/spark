@@ -45,8 +45,7 @@ class FilterPushdownSuite extends PlanTest {
         PushExtraPredicateThroughJoin,
         PushDownPredicates) ::
       Batch("Rewrite With expression", Once,
-        RewriteWithExpression,
-        CollapseProject) :: Nil
+        RewriteWithExpression) :: Nil
   }
 
   val attrA = $"a".int
@@ -1538,23 +1537,34 @@ class FilterPushdownSuite extends PlanTest {
   }
 
   test("SPARK-48368: use WITH expression in PushDownPredicates to avoid duplicate expressions") {
+    // through project
     val caseWhen = CaseWhen(Seq(
       (EqualTo(1, $"a"), $"a" + 1),
       (EqualTo(2, $"a"), $"a" + 2),
       (Literal(true), $"a")))
-    val originalQuery1 = testRelation
-      .select(caseWhen as "c")
-      .select(If(LessThan(1, $"c"), -$"c", $"c").as("d"))
-      .where(If(LessThan(0, $"d"), -$"d", $"d") > 1)
+    val originalQuery1 = testRelation.select($"b", caseWhen as "d")
+      .where(If(LessThan(0, $"d"), -$"d", $"d") > 1 && $"b" > 1)
     val optimized1 = Optimize.execute(originalQuery1.analyze)
     val correctAnswer1 = testRelation
-      .select($"a", $"b", $"c", caseWhen as "_common_expr_1")
-      .select($"a", $"b", $"c", $"_common_expr_1",
-        If(LessThan(1, $"_common_expr_1"), -$"_common_expr_1", $"_common_expr_1")
-          .as("_common_expr_0"))
-      .where(If(LessThan(0, $"_common_expr_0"), -$"_common_expr_0", $"_common_expr_0") > 1)
-      .select($"_common_expr_0".as("d"))
+      .select($"a", $"b", $"c", caseWhen as "_common_expr_0")
+      .where(If(LessThan(0, $"_common_expr_0"), -$"_common_expr_0", $"_common_expr_0") > 1 && $"b" > 1)
+      .select($"b", $"_common_expr_0" as "d")
       .analyze
     comparePlans(optimized1, correctAnswer1)
+
+    // through aggregate
+    val originalQuery2 = testRelation
+      .select(caseWhen as "d", $"b")
+      .groupBy($"d")($"d", sum($"b").as("e"))
+      .where(If(LessThan(0, $"d"), -$"d", $"d") > 1 && $"e" > 1)
+    val optimized2 = Optimize.execute(originalQuery2.analyze)
+    val correctAnswer2 = testRelation
+      .select($"a", $"b", $"c", caseWhen as "_common_expr_1")
+      .where(If(LessThan(0, $"_common_expr_1"), -$"_common_expr_1", $"_common_expr_1") > 1)
+      .select($"_common_expr_1" as "d", $"b")
+      .groupBy($"d")($"d", sum($"b").as("e"))
+      .where($"e" > 1)
+      .analyze
+    comparePlans(optimized2, correctAnswer2)
   }
 }

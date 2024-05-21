@@ -203,9 +203,7 @@ abstract class Optimizer(catalogManager: CatalogManager)
     operatorOptimizationBatch) :+
     // We must run this batch after `PushPredicateThroughNonJoin`, as
     // `PushPredicateThroughNonJoin` may produce `With` expressions that need to be rewritten.
-    Batch("Rewrite With expression", Once,
-      RewriteWithExpression,
-      CollapseProject) :+
+    Batch("Rewrite With expression", Once, RewriteWithExpression) :+
     Batch("Clean Up Temporary CTE Info", Once, CleanUpTempCTEInfo) :+
     // This batch rewrites plans after the operator optimization and
     // before any batches that depend on stats.
