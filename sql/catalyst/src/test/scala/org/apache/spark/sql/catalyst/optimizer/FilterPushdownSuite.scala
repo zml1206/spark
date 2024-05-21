@@ -44,8 +44,8 @@ class FilterPushdownSuite extends PlanTest {
       Batch("Push extra predicate through join", FixedPoint(10),
         PushExtraPredicateThroughJoin,
         PushDownPredicates) ::
-      Batch("Rewrite With expression", Once, RewriteWithExpression) ::
-      Batch("Collapse Project", FixedPoint(10),
+      Batch("Rewrite With expression", Once,
+        RewriteWithExpression,
         CollapseProject) :: Nil
   }
 
@@ -1537,7 +1537,7 @@ class FilterPushdownSuite extends PlanTest {
     comparePlans(optimizedQueryWithoutStep, correctAnswer)
   }
 
-  test("Use WITH expression in PushDownPredicates to avoid duplicate expressions") {
+  test("SPARK-48368: use WITH expression in PushDownPredicates to avoid duplicate expressions") {
     val caseWhen = CaseWhen(Seq(
       (EqualTo(1, $"a"), $"a" + 1),
       (EqualTo(2, $"a"), $"a" + 2),
