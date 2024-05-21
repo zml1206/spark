@@ -151,9 +151,6 @@ abstract class Optimizer(catalogManager: CatalogManager)
 
     val batches = (
     Batch("Finish Analysis", Once, FinishAnalysis) ::
-    // We must run this batch after `ReplaceExpressions`, as `RuntimeReplaceable` expression
-    // may produce `With` expressions that need to be rewritten.
-    Batch("Rewrite With expression", Once, RewriteWithExpression) ::
     //////////////////////////////////////////////////////////////////////////////////////////
     // Optimizer rules start here
     //////////////////////////////////////////////////////////////////////////////////////////
@@ -201,6 +198,9 @@ abstract class Optimizer(catalogManager: CatalogManager)
       RemoveLiteralFromGroupExpressions,
       RemoveRepetitionFromGroupExpressions) :: Nil ++
     operatorOptimizationBatch) :+
+    // We must run this batch after `ReplaceExpressions`, as `RuntimeReplaceable` expression
+    // may produce `With` expressions that need to be rewritten.
+    Batch("Rewrite With expression", Once, RewriteWithExpression) :+
     Batch("Clean Up Temporary CTE Info", Once, CleanUpTempCTEInfo) :+
     // This batch rewrites plans after the operator optimization and
     // before any batches that depend on stats.
@@ -1248,7 +1248,7 @@ object CollapseProject extends Rule[LogicalPlan] with AliasHelper {
    * Return all the references of the given expression without deduplication, which is different
    * from `Expression.references`.
    */
-  private def collectReferences(e: Expression): Seq[Attribute] = e.collect {
+  def collectReferences(e: Expression): Seq[Attribute] = e.collect {
     case a: Attribute => a
   }
 
@@ -1766,7 +1766,7 @@ object PushPredicateThroughNonJoin extends Rule[LogicalPlan] with PredicateHelpe
     case Filter(condition, project @ Project(fields, grandChild))
       if fields.forall(_.deterministic) && canPushThroughCondition(grandChild, condition) =>
       val aliasMap = getAliasMap(project)
-      project.copy(child = Filter(replaceAlias(condition, aliasMap), grandChild))
+      project.copy(child = Filter(transformExpression(condition, aliasMap), grandChild))
 
     // We can push down deterministic predicate through Aggregate, including throwable predicate.
     // If we can push down a filter through Aggregate, it means the filter only references the
@@ -1873,6 +1873,28 @@ object PushPredicateThroughNonJoin extends Rule[LogicalPlan] with PredicateHelpe
       pushDownPredicate(filter, u.child) { predicate =>
         u.withNewChildren(Seq(Filter(predicate, u.child)))
       }
+  }
+
+  def transformExpression(
+      condition: Expression,
+      aliasMap: AttributeMap[Alias]): Expression = {
+    if (!SQLConf.get.getConf(SQLConf.ALWAYS_INLINE_COMMON_EXPR)) {
+      val commonExprMap = CollapseProject.collectReferences(condition)
+        .groupBy(identity)
+        .transform((_, v) => v.size)
+        .map {
+          case (reference, count) =>
+            val producer = trimAliases(aliasMap.getOrElse(reference, reference))
+            val filter = count > 1 && !CollapseProject.isCheap(producer)
+            (reference -> producer, filter)
+        }
+        .filter(_._2)
+        .map(_._1)
+      val replaceMap = AttributeMap(aliasMap.removedAll(commonExprMap.keys))
+      With.transformToWith(replaceAlias(condition, replaceMap), commonExprMap)
+    } else {
+      replaceAlias(condition, aliasMap)
+    }
   }
 
   def canPushThrough(p: UnaryNode): Boolean = p match {

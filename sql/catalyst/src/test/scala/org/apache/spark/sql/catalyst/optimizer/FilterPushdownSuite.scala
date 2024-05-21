@@ -43,7 +43,10 @@ class FilterPushdownSuite extends PlanTest {
         CollapseProject) ::
       Batch("Push extra predicate through join", FixedPoint(10),
         PushExtraPredicateThroughJoin,
-        PushDownPredicates) :: Nil
+        PushDownPredicates) ::
+      Batch("Rewrite With expression", Once, RewriteWithExpression) ::
+      Batch("Collapse Project", FixedPoint(10),
+        CollapseProject) :: Nil
   }
 
   val attrA = $"a".int
@@ -1532,5 +1535,27 @@ class FilterPushdownSuite extends PlanTest {
     val correctAnswer = x.where(IsNotNull(Sequence($"x.a", $"x.b", None)) && $"x.c" > 1)
       .analyze
     comparePlans(optimizedQueryWithoutStep, correctAnswer)
+  }
+
+  test("Use WITH expression in PushDownPredicates to avoid duplicate expressions") {
+    val caseWhen = CaseWhen(Seq(
+      (EqualTo(1, $"a"), $"a" + 1),
+      (EqualTo(2, $"a"), $"a" + 2),
+      (Literal(true), $"a")))
+    val originalQuery1 = testRelation
+      .select(caseWhen as "c")
+      .select(If(LessThan(1, $"c"), -$"c", $"c").as("d"))
+      .where(If(LessThan(0, $"d"), -$"d", $"d") > 1)
+    val optimized1 = Optimize.execute(originalQuery1.analyze)
+    val correctAnswer1 = testRelation
+      .select($"a", $"b", $"c", caseWhen as "_common_expr_1")
+      .select($"a", $"b", $"c", $"_common_expr_1",
+        If(LessThan(1, $"_common_expr_1"), -$"_common_expr_1", $"_common_expr_1")
+          .as("_common_expr_0"))
+      .where(If(LessThan(0, $"_common_expr_0"), -$"_common_expr_0", $"_common_expr_0") > 1)
+      .select(caseWhen as "c")
+      .select(If(LessThan(1, $"c"), -$"c", $"c").as("d"))
+      .analyze
+    comparePlans(optimized1, correctAnswer1)
   }
 }

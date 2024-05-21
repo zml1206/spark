@@ -96,7 +96,7 @@ case class With(child: Expression, defs: Seq[CommonExpressionDef])
   )
 }
 
-object With {
+object With extends AliasHelper {
   /**
    * Helper function to create a [[With]] statement with an arbitrary number of common expressions.
    * Note that the number of arguments in `commonExprs` should be the same as the number of
@@ -110,6 +110,54 @@ object With {
     val commonExprDefs = commonExprs.map(CommonExpressionDef(_))
     val commonExprRefs = commonExprDefs.map(new CommonExpressionRef(_))
     With(replaced(commonExprRefs), commonExprDefs)
+  }
+
+  /**
+   * Use [[With]] to transform expression. It used in predicate pushdown for non-cheap common
+   * expressions. To avoid multiple traversals, add [[With]] first, and then replace
+   * commonExpressionRef uniformly.
+   * @param expr the expression that needs to be transformed
+   * @param commonExprMap non-cheap common expressions attribute map
+   * @return expression after transform
+   */
+  def transformToWith(expr: Expression, commonExprMap: Map[Attribute, Expression]): Expression = {
+    if (commonExprMap.nonEmpty) {
+      val commonExprDefsMap = commonExprMap.map(map => map._1 -> CommonExpressionDef(map._2))
+      val commonExprRefsMap = commonExprDefsMap.map(map =>
+        map._1 -> new CommonExpressionRef(map._2))
+      var transformed = expr
+      commonExprDefsMap.foreach(map => transformed = addWith(transformed, map._1, map._2))
+      replaceCommonExprRef(transformed, commonExprRefsMap)
+    } else {
+      expr
+    }
+  }
+
+  private def addWith(
+      expr: Expression,
+      attr: Attribute,
+      commonExprDef: CommonExpressionDef): Expression = {
+    val transformed = expr.transformUp {
+      case ced @ CommonExpressionDef(child, _) if child.references.contains(attr) =>
+        ced.copy(child = With(child, Seq(commonExprDef)))
+      case w: With if w.child.references.contains(attr) =>
+        w.copy(defs = w.defs :+ commonExprDef)
+    }
+    if (transformed == expr) {
+      With(expr, Seq(commonExprDef))
+    } else {
+      transformed
+    }
+  }
+
+  private def replaceCommonExprRef(
+      expr: Expression,
+      commonExprRefsMap: Map[Attribute, CommonExpressionRef]): Expression = {
+    // Use transformUp to prevent infinite recursion when the replacement expression
+    // redefines the same ExprId,
+    trimAliases(expr.transformUp {
+      case a: Attribute => commonExprRefsMap.getOrElse(a, a)
+    })
   }
 
   private[sql] def childContainsUnsupportedAggExpr(withExpr: With): Boolean = {
