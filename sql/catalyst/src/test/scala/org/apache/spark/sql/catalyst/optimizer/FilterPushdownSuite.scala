@@ -1553,8 +1553,7 @@ class FilterPushdownSuite extends PlanTest {
         If(LessThan(1, $"_common_expr_1"), -$"_common_expr_1", $"_common_expr_1")
           .as("_common_expr_0"))
       .where(If(LessThan(0, $"_common_expr_0"), -$"_common_expr_0", $"_common_expr_0") > 1)
-      .select(caseWhen as "c")
-      .select(If(LessThan(1, $"c"), -$"c", $"c").as("d"))
+      .select($"_common_expr_0".as("d"))
       .analyze
     comparePlans(optimized1, correctAnswer1)
   }

@@ -122,11 +122,12 @@ object With extends AliasHelper {
    */
   def transformToWith(expr: Expression, commonExprMap: Map[Attribute, Expression]): Expression = {
     if (commonExprMap.nonEmpty) {
-      val commonExprDefsMap = commonExprMap.map(map => map._1 -> CommonExpressionDef(map._2))
-      val commonExprRefsMap = commonExprDefsMap.map(map =>
-        map._1 -> new CommonExpressionRef(map._2))
+      val commonExprDefs = commonExprMap.map(map =>
+        CommonExpressionDef(child = map._2, originAttr = Some(map._1))).toSeq
+      val commonExprRefsMap = commonExprDefs.map(defs =>
+        defs.originAttr.get -> new CommonExpressionRef(defs)).toMap
       var transformed = expr
-      commonExprDefsMap.foreach(map => transformed = addWith(transformed, map._1, map._2))
+      commonExprDefs.foreach(defs => transformed = addWith(transformed, defs))
       replaceCommonExprRef(transformed, commonExprRefsMap)
     } else {
       expr
@@ -135,12 +136,12 @@ object With extends AliasHelper {
 
   private def addWith(
       expr: Expression,
-      attr: Attribute,
       commonExprDef: CommonExpressionDef): Expression = {
     val transformed = expr.transformUp {
-      case ced @ CommonExpressionDef(child, _) if child.references.contains(attr) =>
+      case ced @ CommonExpressionDef(child, _, _)
+        if child.references.contains(commonExprDef.originAttr.get) =>
         ced.copy(child = With(child, Seq(commonExprDef)))
-      case w: With if w.child.references.contains(attr) =>
+      case w: With if w.child.references.contains(commonExprDef.originAttr.get) =>
         w.copy(defs = w.defs :+ commonExprDef)
     }
     if (transformed == expr) {
@@ -198,7 +199,10 @@ object CommonExpressionId {
 /**
  * A wrapper of common expression to carry the id.
  */
-case class CommonExpressionDef(child: Expression, id: CommonExpressionId = new CommonExpressionId())
+case class CommonExpressionDef(
+    child: Expression,
+    id: CommonExpressionId = new CommonExpressionId(),
+    originAttr: Option[Attribute] = None)
   extends UnaryExpression with Unevaluable {
   override def dataType: DataType = child.dataType
   override protected def withNewChildInternal(newChild: Expression): Expression =

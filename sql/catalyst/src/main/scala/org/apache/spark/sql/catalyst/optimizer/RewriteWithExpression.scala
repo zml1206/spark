@@ -24,7 +24,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.planning.PhysicalAggregation
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan, PlanHelper, Project}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.trees.TreePattern.{COMMON_EXPR_REF, WITH_EXPRESSION}
+import org.apache.spark.sql.catalyst.trees.TreePattern.{ALIAS, COMMON_EXPR_REF, WITH_EXPRESSION}
 import org.apache.spark.sql.internal.SQLConf
 
 /**
@@ -39,7 +39,8 @@ import org.apache.spark.sql.internal.SQLConf
  */
 object RewriteWithExpression extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = {
-    plan.transformUpWithSubqueriesAndPruning(_.containsPattern(WITH_EXPRESSION)) {
+    val replaceMap = mutable.Map[Attribute, Attribute]()
+    val rewriteWith = plan.transformUpWithSubqueriesAndPruning(_.containsPattern(WITH_EXPRESSION)) {
       // For aggregates, separate the computation of the aggregations themselves from the final
       // result by moving the final result computation into a projection above it. This prevents
       // this rule from producing an invalid Aggregate operator.
@@ -57,18 +58,31 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
         }.asInstanceOf[NamedExpression])
         // Rewrite the projection and the aggregate separately and then piece them together.
         val agg = Aggregate(groupingExpressions, groupingExpressions ++ aggExprs, child)
-        val rewrittenAgg = applyInternal(agg)
+        val rewrittenAgg = applyInternal(agg, replaceMap)
         val proj = Project(resExprs, rewrittenAgg)
-        applyInternal(proj)
+        applyInternal(proj, replaceMap)
       case p if p.expressions.exists(_.containsPattern(WITH_EXPRESSION)) =>
-        applyInternal(p)
+        applyInternal(p, replaceMap)
+    }
+
+    // With generated in the predicate pushdown has the origin attribute.
+    // We need to replace the attribute of the original Alias to avoid secondary calculations.
+    if (replaceMap.nonEmpty) {
+      rewriteWith.transformAllExpressionsWithPruning(_.containsPattern(ALIAS)) {
+        case alias: Alias if replaceMap.contains(alias.toAttribute) =>
+          alias.withNewChildren(Seq(replaceMap(alias.toAttribute)))
+      }
+    } else {
+      rewriteWith
     }
   }
 
-  private def applyInternal(p: LogicalPlan): LogicalPlan = {
+  private def applyInternal(
+      p: LogicalPlan,
+      replaceMap: mutable.Map[Attribute, Attribute]): LogicalPlan = {
     val inputPlans = p.children.toArray
     var newPlan: LogicalPlan = p.mapExpressions { expr =>
-      rewriteWithExprAndInputPlans(expr, inputPlans)
+      rewriteWithExprAndInputPlans(expr, inputPlans, replaceMap)
     }
     newPlan = newPlan.withNewChildren(inputPlans.toIndexedSeq)
     // Since we add extra Projects with extra columns to pre-evaluate the common expressions,
@@ -85,17 +99,18 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
 
   private def rewriteWithExprAndInputPlans(
       e: Expression,
-      inputPlans: Array[LogicalPlan]): Expression = {
+      inputPlans: Array[LogicalPlan],
+      replaceMap: mutable.Map[Attribute, Attribute]): Expression = {
     if (!e.containsPattern(WITH_EXPRESSION)) return e
     e match {
       case w: With =>
         // Rewrite nested With expressions first
-        val child = rewriteWithExprAndInputPlans(w.child, inputPlans)
-        val defs = w.defs.map(rewriteWithExprAndInputPlans(_, inputPlans))
+        val child = rewriteWithExprAndInputPlans(w.child, inputPlans, replaceMap)
+        val defs = w.defs.map(rewriteWithExprAndInputPlans(_, inputPlans, replaceMap))
         val refToExpr = mutable.HashMap.empty[CommonExpressionId, Expression]
         val childProjections = Array.fill(inputPlans.length)(mutable.ArrayBuffer.empty[Alias])
 
-        defs.zipWithIndex.foreach { case (CommonExpressionDef(child, id), index) =>
+        defs.zipWithIndex.foreach { case (CommonExpressionDef(child, id, originAttr), index) =>
           if (child.containsPattern(COMMON_EXPR_REF)) {
             throw SparkException.internalError(
               "Common expression definition cannot reference other Common expression definitions")
@@ -134,6 +149,7 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
                 refToExpr(id) = child
               } else {
                 childProjections(childProjectionIndex) += alias
+                originAttr.foreach(replaceMap.put(_, alias.toAttribute))
                 refToExpr(id) = alias.toAttribute
               }
             }
@@ -161,7 +177,7 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
 
       case c: ConditionalExpression =>
         val newAlwaysEvaluatedInputs = c.alwaysEvaluatedInputs.map(
-          rewriteWithExprAndInputPlans(_, inputPlans))
+          rewriteWithExprAndInputPlans(_, inputPlans, replaceMap))
         val newExpr = c.withNewAlwaysEvaluatedInputs(newAlwaysEvaluatedInputs)
         // Use transformUp to handle nested With.
         newExpr.transformUpWithPruning(_.containsPattern(WITH_EXPRESSION)) {
@@ -174,7 +190,7 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
             }
         }
 
-      case other => other.mapChildren(rewriteWithExprAndInputPlans(_, inputPlans))
+      case other => other.mapChildren(rewriteWithExprAndInputPlans(_, inputPlans, replaceMap))
     }
   }
 }
