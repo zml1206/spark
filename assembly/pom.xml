@@ -129,6 +129,49 @@
 
   <profiles>
     <profile>
+      <id>guan</id>
+        <dependencies>
+          <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-avro_${scala.binary.version}</artifactId>
+            <version>${project.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aws</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>${hadoop.deps.scope}</scope>
+            <exclusions>
+              <exclusion>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-common</artifactId>
+              </exclusion>
+              <exclusion>
+                <groupId>commons-logging</groupId>
+                <artifactId>commons-logging</artifactId>
+              </exclusion>
+              <exclusion>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+              </exclusion>
+              <exclusion>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+              </exclusion>
+              <exclusion>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-annotations</artifactId>
+              </exclusion>
+              <!-- Keep old SDK out of the assembly to avoid conflict with Kinesis module -->
+              <exclusion>
+                <groupId>com.amazonaws</groupId>
+                <artifactId>aws-java-sdk</artifactId>
+              </exclusion>
+            </exclusions>
+          </dependency>
+      </dependencies>
+    </profile>
+    <profile>
       <id>yarn</id>
       <dependencies>
         <dependency>
