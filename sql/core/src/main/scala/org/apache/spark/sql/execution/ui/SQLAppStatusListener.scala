@@ -51,6 +51,10 @@ class SQLAppStatusListener(
   // thread-safe.
   private val liveExecutions = new ConcurrentHashMap[Long, LiveExecutionData]()
   private val stageMetrics = new ConcurrentHashMap[Int, LiveStageMetrics]()
+  private val pendingStages = new ConcurrentHashMap[Int, mutable.ListBuffer[Int]]()
+
+  // Submitted stage
+  private val activeStages = mutable.ListBuffer[Int]()
 
   // Returns true if this listener has no live data. Exposed for tests only.
   private[sql] def noLiveData(): Boolean = {
@@ -118,7 +122,7 @@ class SQLAppStatusListener(
           stage.numTasks, accumIdsAndType))
       }
     }
-
+    pendingStages.putIfAbsent(event.jobId, mutable.ListBuffer() ++= event.stageIds)
     exec.jobs = exec.jobs + (jobId -> JobExecutionStatus.RUNNING)
     exec.stages ++= event.stageIds.toSet
     update(exec, force = true)
@@ -135,6 +139,7 @@ class SQLAppStatusListener(
         stageMetrics.put(event.stageInfo.stageId,
           new LiveStageMetrics(event.stageInfo.stageId, event.stageInfo.attemptNumber,
             stage.numTasks, stage.accumIdsToMetricType))
+        activeStages += event.stageInfo.stageId
       }
     }
   }
@@ -149,6 +154,12 @@ class SQLAppStatusListener(
         exec.jobs = exec.jobs + (event.jobId -> result)
         exec.endEvents.incrementAndGet()
         update(exec)
+        val finishedStages = Option.apply(pendingStages.remove(event.jobId))
+        if (finishedStages.isDefined) {
+          for (stageId <- finishedStages.get -- activeStages) {
+            stageMetrics.remove(stageId)
+          }
+        }
       }
     }
   }
@@ -421,7 +432,12 @@ class SQLAppStatusListener(
     }.toSet
     stageMetrics.keySet().asScala
       .filter(!activeStages.contains(_))
-      .foreach(stageMetrics.remove)
+      .foreach {
+        stageId => {
+          stageMetrics.remove(stageId)
+          this.activeStages -= stageId
+        }
+      }
   }
 
   private def onDriverAccumUpdates(event: SparkListenerDriverAccumUpdates): Unit = {
