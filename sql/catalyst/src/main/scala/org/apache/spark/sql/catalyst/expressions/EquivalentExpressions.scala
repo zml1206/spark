@@ -76,10 +76,6 @@ class EquivalentExpressions {
         case _ =>
           if (useCount > 0) {
             map.put(wrapper, ExpressionStats(expr)(useCount))
-          } else {
-            // Should not happen
-            throw new IllegalStateException(
-              s"Cannot update expression: $expr in map: $map with use count: $useCount")
           }
           false
       }
