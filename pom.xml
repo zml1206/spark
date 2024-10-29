@@ -119,7 +119,7 @@
     <slf4j.version>2.0.6</slf4j.version>
     <log4j.version>2.19.0</log4j.version>
     <!-- make sure to update IsolatedClientLoader whenever this version is changed -->
-    <hadoop.version>3.3.6</hadoop.version>
+    <hadoop.version>3.3.6.1</hadoop.version>
     <!-- SPARK-41247: When updating `protobuf.version`, also need to update `protoVersion` in `SparkBuild.scala` -->
     <protobuf.version>3.22.3</protobuf.version>
     <protoc-jar-maven-plugin.version>3.11.4</protoc-jar-maven-plugin.version>
@@ -137,10 +137,10 @@
     <kafka.version>3.3.2</kafka.version>
     <!-- After 10.15.1.3, the minimum required version is JDK9 -->
     <derby.version>10.14.2.0</derby.version>
-    <parquet.version>1.13.1</parquet.version>
+    <parquet.version>1.14.2</parquet.version>
     <orc.version>1.9.4</orc.version>
     <orc.classifier>shaded-protobuf</orc.classifier>
-    <jetty.version>9.4.54.v20240208</jetty.version>
+    <jetty.version>9.4.56.v20240826</jetty.version>
     <jakartaservlet.version>4.0.3</jakartaservlet.version>
     <chill.version>0.10.0</chill.version>
     <ivy.version>2.5.1</ivy.version>
@@ -152,7 +152,7 @@
     -->
     <codahale.metrics.version>4.2.15</codahale.metrics.version>
     <!-- Should be consistent with SparkBuild.scala and docs -->
-    <avro.version>1.11.3</avro.version>
+    <avro.version>1.11.4</avro.version>
     <aws.kinesis.client.version>1.12.0</aws.kinesis.client.version>
     <!-- Should be consistent with Kinesis client dependency -->
     <aws.java.sdk.version>1.11.655</aws.java.sdk.version>
@@ -187,7 +187,7 @@
     <netlib.ludovic.dev.version>3.0.3</netlib.ludovic.dev.version>
     <commons-codec.version>1.15</commons-codec.version>
     <commons-compress.version>1.26.2</commons-compress.version>
-    <commons-io.version>2.11.0</commons-io.version>
+    <commons-io.version>2.14.0</commons-io.version>
     <!-- org.apache.commons/commons-lang/-->
     <commons-lang2.version>2.6</commons-lang2.version>
     <!-- org.apache.commons/commons-lang3/-->
@@ -224,6 +224,9 @@
     <!-- org.fusesource.leveldbjni will be used except on arm64 platform. -->
     <leveldbjni.group>org.fusesource.leveldbjni</leveldbjni.group>
     <kubernetes-client.version>6.9.0</kubernetes-client.version>
+    <okio.version>3.9.0</okio.version>
+    <okhttp.version>4.12.0</okhttp.version>
+    <kotlin-stdlib.version>2.0.10</kotlin-stdlib.version>
 
     <test.java.home>${java.home}</test.java.home>
 
@@ -325,6 +328,21 @@
   </properties>
   <repositories>
     <repository>
+      <id>aliyun-maven-central-mirror</id>
+        <!--
+            Aliyun Mirror of Maven Central, placed first so that it's used instead of flaky Maven Central.
+            See https://maven.aliyun.com/mvn/view
+            -->
+        <name>Aliyun Maven Central mirror</name>
+        <url>https://maven.aliyun.com/nexus/content/groups/public</url>
+    </repository>
+    <repository>
+      <id>guandata-release</id>
+      <!-- gunadata mirror -->
+      <name>Guandata Release</name>
+      <url>https://app.mayidata.com/nexus/repository/maven-releases</url>
+    </repository>
+    <repository>
       <id>gcs-maven-central-mirror</id>
       <!--
         Google Mirror of Maven Central, placed first so that it's used instead of flaky Maven Central.
@@ -355,6 +373,15 @@
     </repository>
   </repositories>
   <pluginRepositories>
+    <pluginRepository>
+      <id>aliyun-maven-central-mirror</id>
+      <!--
+          Aliyun Mirror of Maven Central, placed first so that it's used instead of flaky Maven Central.
+          See https://maven.aliyun.com/mvn/view
+          -->
+      <name>Aliyun Maven Central mirror</name>
+      <url>https://maven.aliyun.com/nexus/content/groups/public</url>
+    </pluginRepository>
     <pluginRepository>
       <id>gcs-maven-central-mirror</id>
       <!--
@@ -2807,6 +2834,11 @@
         <groupId>com.google.code.gson</groupId>
         <artifactId>gson</artifactId>
         <version>${gson.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.squareup.okio</groupId>
+        <artifactId>okio</artifactId>
+        <version>${okio.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

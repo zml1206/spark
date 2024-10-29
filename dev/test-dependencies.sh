@@ -34,7 +34,6 @@ HADOOP_MODULE_PROFILES="-Phive-thriftserver -Pmesos -Pkubernetes -Pyarn -Phive \
     -Pspark-ganglia-lgpl -Pkinesis-asl -Phadoop-cloud"
 MVN="build/mvn"
 HADOOP_HIVE_PROFILES=(
-    hadoop-2-hive-2.3
     hadoop-3-hive-2.3
 )
 
