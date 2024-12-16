@@ -45,7 +45,10 @@ class FilterPushdownSuite extends PlanTest {
         CollapseProject) ::
       Batch("Push extra predicate through join", FixedPoint(10),
         PushExtraPredicateThroughJoin,
-        PushDownPredicates) :: Nil
+        PushDownPredicates) ::
+      Batch("Rewrite With expression", Once,
+        RewriteWithExpression,
+        CollapseProject) :: Nil
   }
 
   val attrA = $"a".int
@@ -150,6 +153,7 @@ class FilterPushdownSuite extends PlanTest {
   }
 
   test("can't push without rewrite") {
+    CommonExpressionId.resetCurId
     val originalQuery =
       testRelation
         .select($"a" + $"b" as "e")
@@ -159,8 +163,9 @@ class FilterPushdownSuite extends PlanTest {
     val optimized = Optimize.execute(originalQuery.analyze)
     val correctAnswer =
       testRelation
-        .where($"a" + $"b" === 1)
-        .select($"a" + $"b" as "e")
+        .select($"a", $"b", $"c", $"a" + $"b" as "_common_expr_0")
+        .where($"_common_expr_0" === 1)
+        .select($"_common_expr_0" as "e")
         .analyze
 
     comparePlans(optimized, correctAnswer)
@@ -771,6 +776,7 @@ class FilterPushdownSuite extends PlanTest {
   }
 
   test("aggregate: push down filters with alias") {
+    CommonExpressionId.resetCurId
     val originalQuery = testRelation
       .select($"a", $"b")
       .groupBy($"a")(($"a" + 1) as "aa", count($"b") as "c")
@@ -779,9 +785,10 @@ class FilterPushdownSuite extends PlanTest {
     val optimized = Optimize.execute(originalQuery.analyze)
 
     val correctAnswer = testRelation
-      .where($"a" + 1 < 3)
-      .select($"a", $"b")
-      .groupBy($"a")(($"a" + 1) as "aa", count($"b") as "c")
+      .select($"a", $"b", $"c", $"a" + 1 as "_common_expr_0")
+      .where($"_common_expr_0" < 3)
+      .select($"a", $"b", $"_common_expr_0")
+      .groupBy($"a", $"_common_expr_0")($"_common_expr_0" as "aa", count($"b") as "c")
       .where($"c" === 2L || $"aa" > 4)
       .analyze
 
@@ -1538,5 +1545,32 @@ class FilterPushdownSuite extends PlanTest {
     val correctAnswer = x.where(IsNotNull(Sequence($"x.a", $"x.b", None)) && $"x.c" > 1)
       .analyze
     comparePlans(optimizedQueryWithoutStep, correctAnswer)
+  }
+
+  test("Use WITH expression in PushDownPredicates to avoid duplicate expressions") {
+    CommonExpressionId.resetCurId
+    val caseWhen = CaseWhen(Seq(
+      (EqualTo(1, $"a"), $"a" + 1),
+      (EqualTo(2, $"a"), $"a" + 2),
+      (Literal(true), $"a")))
+    val originalQuery1 = testRelation
+      .select(caseWhen as "c")
+      .groupBy($"c")($"c", count(1) as "d")
+      .select($"c", $"d", If($"c" < 1, -$"c", $"c").as("e"))
+      .where($"e" > 0 && If($"e" < 0, -$"e", $"e") > 1 && $"d" > $"e")
+    val optimized1 = Optimize.execute(originalQuery1.analyze)
+    val correctAnswer1 = testRelation
+      .select($"a", $"b", $"c", caseWhen as "_common_expr_1")
+      .select($"a", $"b", $"c", $"_common_expr_1",
+        If($"_common_expr_1" < 1, -$"_common_expr_1", $"_common_expr_1")
+          .as("_common_expr_0"))
+      .where($"_common_expr_0" > 0 &&
+        If($"_common_expr_0" < 0, -$"_common_expr_0", $"_common_expr_0") > 1)
+      .select($"_common_expr_1".as("c"), $"_common_expr_0")
+      .groupBy($"c", $"_common_expr_0")($"c", count(1) as "d", $"_common_expr_0")
+      .where($"d" > $"_common_expr_0")
+      .select($"c", $"d", $"_common_expr_0".as("e"))
+      .analyze
+    comparePlans(optimized1, correctAnswer1)
   }
 }

@@ -17,6 +17,9 @@
 
 package org.apache.spark.sql.catalyst.expressions
 
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.trees.TreePattern.{COMMON_EXPR_REF, TreePattern, WITH_EXPRESSION}
 import org.apache.spark.sql.types.DataType
@@ -96,7 +99,7 @@ case class With(child: Expression, defs: Seq[CommonExpressionDef])
   )
 }
 
-object With {
+object With extends PredicateHelper {
   /**
    * Helper function to create a [[With]] statement with an arbitrary number of common expressions.
    * Note that the number of arguments in `commonExprs` should be the same as the number of
@@ -110,6 +113,38 @@ object With {
     val commonExprDefs = commonExprs.map(CommonExpressionDef(_))
     val commonExprRefs = commonExprDefs.map(new CommonExpressionRef(_))
     With(replaced(commonExprRefs), commonExprDefs)
+  }
+
+  def rewriteConditionByWith(condition: Expression, aliasMap: AttributeMap[Alias]): Expression = {
+    val commonExprRefsMap = new mutable.HashMap[Attribute, CommonExpressionRef]()
+    val commonExprDefsMap = new mutable.HashMap[Attribute, CommonExpressionDef]()
+    splitConjunctivePredicates(condition).map { expr =>
+      val commonExprDefs = ArrayBuffer.empty[CommonExpressionDef]
+      val withExpr = expr.transformUp {
+        case a: Attribute if aliasMap.contains(a) =>
+          commonExprRefsMap.get(a) match {
+            case Some(e) =>
+              val commonExprDef = commonExprDefsMap(a)
+              if (!commonExprDefs.contains(commonExprDef)) {
+                commonExprDefs.append(commonExprDef)
+              }
+              e
+            case _ =>
+              val commonExprDef =
+                CommonExpressionDef(aliasMap.get(a).get.child, originAttribute = Option(a))
+              commonExprDefs.append(commonExprDef)
+              commonExprDefsMap.put(a, commonExprDef)
+              val commonExprRef = new CommonExpressionRef(commonExprDef)
+              commonExprRefsMap.put(a, commonExprRef)
+              commonExprRef
+          }
+      }
+      if (commonExprDefs.isEmpty) {
+        expr
+      } else {
+        With(withExpr, commonExprDefs.toSeq)
+      }
+    }.reduce(And)
   }
 
   private[sql] def childContainsUnsupportedAggExpr(withExpr: With): Boolean = {
@@ -143,14 +178,20 @@ case class CommonExpressionId(id: Long = CommonExpressionId.newId, canonicalized
 }
 
 object CommonExpressionId {
-  private[sql] val curId = new java.util.concurrent.atomic.AtomicLong()
+  private[sql] var curId = new java.util.concurrent.atomic.AtomicLong()
   def newId: Long = curId.getAndIncrement()
+  def resetCurId: Unit = {
+    curId = new java.util.concurrent.atomic.AtomicLong()
+  }
 }
 
 /**
  * A wrapper of common expression to carry the id.
  */
-case class CommonExpressionDef(child: Expression, id: CommonExpressionId = new CommonExpressionId())
+case class CommonExpressionDef(
+    child: Expression,
+    id: CommonExpressionId = new CommonExpressionId(),
+    originAttribute: Option[Attribute] = None)
   extends UnaryExpression with Unevaluable {
   override def dataType: DataType = child.dataType
   override protected def withNewChildInternal(newChild: Expression): Expression =
