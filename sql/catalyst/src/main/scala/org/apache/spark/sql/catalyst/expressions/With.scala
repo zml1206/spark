@@ -115,6 +115,15 @@ object With extends PredicateHelper {
     With(replaced(commonExprRefs), commonExprDefs)
   }
 
+  /**
+   * Use [[With]] to rewrite condition's common expressions. After condition is split by and, each
+   * element generates one or 0 [[With]]. Different [[With]] can share the same
+   * [[CommonExpressionDef]].
+   *
+   * @param condition filter's condition expression
+   * @param aliasMap aliasMap from filter's child
+   * @return the condition rewrote by [[With]]
+   */
   def rewriteConditionByWith(condition: Expression, aliasMap: AttributeMap[Alias]): Expression = {
     val commonExprRefsMap = new mutable.HashMap[Attribute, CommonExpressionRef]()
     val commonExprDefsMap = new mutable.HashMap[Attribute, CommonExpressionDef]()
@@ -131,7 +140,7 @@ object With extends PredicateHelper {
               e
             case _ =>
               val commonExprDef =
-                CommonExpressionDef(aliasMap.get(a).get.child, originAttribute = Option(a))
+                CommonExpressionDef(aliasMap(a).child, originAttribute = Option(a))
               commonExprDefs.append(commonExprDef)
               commonExprDefsMap.put(a, commonExprDef)
               val commonExprRef = new CommonExpressionRef(commonExprDef)
@@ -180,6 +189,7 @@ case class CommonExpressionId(id: Long = CommonExpressionId.newId, canonicalized
 object CommonExpressionId {
   private[sql] var curId = new java.util.concurrent.atomic.AtomicLong()
   def newId: Long = curId.getAndIncrement()
+  // Only used for test.
   def resetCurId: Unit = {
     curId = new java.util.concurrent.atomic.AtomicLong()
   }

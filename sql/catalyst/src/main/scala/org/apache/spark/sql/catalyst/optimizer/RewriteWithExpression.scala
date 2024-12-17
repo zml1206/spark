@@ -77,6 +77,8 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
     }
 
     plan.transformUpWithSubqueriesAndPruning(AlwaysProcess.fn) {
+      // Common ExpressionDef with originAttribute from project and aggregate, we should replace
+      // origin alias and make sure the attribute does not missing.
       case project: Project =>
         val newProject = replaceProjectAlias(project)
         if (newProject.expressions.exists(_.containsPattern(WITH_EXPRESSION))) {
@@ -118,6 +120,8 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
       p: LogicalPlan,
       replaceMap: mutable.Map[Attribute, Attribute]): LogicalPlan = {
     var newPlan = p
+    // We need completely bottom-up rewrite With, because With produced by push down predicate
+    // can share the same CommonExpressionDef.
     while (newPlan.expressions.exists(_.containsPattern(WITH_EXPRESSION))) {
       val inputPlans = newPlan.children.toArray
       newPlan = newPlan.mapExpressions { expr =>
