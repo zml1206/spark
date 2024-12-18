@@ -22,7 +22,7 @@ import scala.collection.mutable
 import org.apache.spark.SparkException
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.planning.PhysicalAggregation
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan, PlanHelper, Project}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, BinaryNode, LeafNode, LogicalPlan, PlanHelper, Project, Union}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.AlwaysProcess
 import org.apache.spark.sql.catalyst.trees.TreePattern.{COMMON_EXPR_REF, WITH_EXPRESSION}
@@ -41,13 +41,14 @@ import org.apache.spark.sql.internal.SQLConf
 object RewriteWithExpression extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = {
 
-    val replaceMap: mutable.Map[Attribute, Attribute] = mutable.Map[Attribute, Attribute]()
+    val replaceMapBuffer = mutable.ArrayBuffer.empty[mutable.Map[ExprId, Attribute]]
+    def replaceMap: mutable.Map[ExprId, Attribute] = replaceMapBuffer.head
 
     def replaceProjectAlias(p: Project): Project = {
       val newProjectList = p.projectList.map {
-        case a: Alias if replaceMap.contains(a.toAttribute) =>
-          val newChild = replaceMap(a.toAttribute)
-          replaceMap.remove(a.toAttribute)
+        case a: Alias if replaceMap.contains(a.toAttribute.exprId) =>
+          val newChild = replaceMap(a.toAttribute.exprId)
+          replaceMap.remove(a.toAttribute.exprId)
           a.copy(child = newChild)(
             exprId = a.exprId,
             qualifier = a.qualifier,
@@ -61,10 +62,10 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
     def replaceAggregateAlias(agg: Aggregate): Aggregate = {
       val newGroupExprs = agg.groupingExpressions.toBuffer
       val newAggExprs = agg.aggregateExpressions.map {
-        case a: Alias if replaceMap.contains(a.toAttribute) =>
-          val newChild = replaceMap(a.toAttribute)
+        case a: Alias if replaceMap.contains(a.toAttribute.exprId) =>
+          val newChild = replaceMap(a.toAttribute.exprId)
           newGroupExprs.append(newChild)
-          replaceMap.remove(a.toAttribute)
+          replaceMap.remove(a.toAttribute.exprId)
           a.copy(child = newChild)(
             exprId = a.exprId,
             qualifier = a.qualifier,
@@ -76,16 +77,35 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
         aggregateExpressions = newAggExprs ++ replaceMap.values.toSeq)
     }
 
+    def applyInternal0(p: LogicalPlan): LogicalPlan = {
+      if (p.expressions.exists(_.containsPattern(WITH_EXPRESSION))) {
+        applyInternal(p, replaceMap)
+      } else {
+        p
+      }
+    }
+
     plan.transformUpWithSubqueriesAndPruning(AlwaysProcess.fn) {
+      case l: LeafNode =>
+        val replaceMap = mutable.Map[ExprId, Attribute]()
+        replaceMapBuffer.prepend(replaceMap)
+        l
+      case u: Union =>
+        assert(replaceMapBuffer.size >= u.children.size)
+        replaceMapBuffer.remove(1, u.children.size - 1)
+        u
+      case b: BinaryNode =>
+        assert(replaceMapBuffer.size > 1)
+        val newMap = (replaceMapBuffer(0) ++ replaceMapBuffer(1))
+          .filter(m => b.output.contains(m._2))
+        replaceMapBuffer.drop(2)
+        replaceMapBuffer.prepend(newMap)
+        applyInternal0(b)
       // Common ExpressionDef with originAttribute from project and aggregate, we should replace
       // origin alias and make sure the attribute does not missing.
       case project: Project =>
         val newProject = replaceProjectAlias(project)
-        if (newProject.expressions.exists(_.containsPattern(WITH_EXPRESSION))) {
-          applyInternal(newProject, replaceMap)
-        } else {
-          newProject
-        }
+        applyInternal0(newProject)
       case agg: Aggregate =>
         val newAgg = replaceAggregateAlias(agg)
         newAgg match {
@@ -118,7 +138,7 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
 
   private def applyInternal(
       p: LogicalPlan,
-      replaceMap: mutable.Map[Attribute, Attribute]): LogicalPlan = {
+      replaceMap: mutable.Map[ExprId, Attribute]): LogicalPlan = {
     var newPlan = p
     // We need completely bottom-up rewrite With, because With produced by push down predicate
     // can share the same CommonExpressionDef.
@@ -151,7 +171,7 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
   private def rewriteWithExprAndInputPlans(
       e: Expression,
       inputPlans: Array[LogicalPlan],
-      replaceMap: mutable.Map[Attribute, Attribute],
+      replaceMap: mutable.Map[ExprId, Attribute],
       isNestedWith: Boolean = false): Expression = {
     if (!e.containsPattern(WITH_EXPRESSION)) return e
     e match {
@@ -187,8 +207,8 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
               // TODO: we should calculate the ref count and also inline the common expression
               //       if it's ref count is 1.
               refToExpr(id) = child
-            } else if (originAttribute.nonEmpty && replaceMap.contains(originAttribute.get)) {
-                refToExpr(id) = replaceMap(originAttribute.get)
+            } else if (originAttribute.nonEmpty && replaceMap.contains(originAttribute.get.exprId)) {
+                refToExpr(id) = replaceMap(originAttribute.get.exprId)
             } else {
               val aliasName = if (SQLConf.get.getConf(SQLConf.USE_COMMON_EXPR_ID_FOR_ALIAS)) {
                 s"_common_expr_${id.id}"
@@ -202,7 +222,7 @@ object RewriteWithExpression extends Rule[LogicalPlan] {
                 refToExpr(id) = child
               } else {
                 if (originAttribute.nonEmpty) {
-                  replaceMap.put(originAttribute.get, alias.toAttribute)
+                  replaceMap.put(originAttribute.get.exprId, alias.toAttribute)
                 }
                 childProjections(childProjectionIndex) += alias
                 refToExpr(id) = alias.toAttribute

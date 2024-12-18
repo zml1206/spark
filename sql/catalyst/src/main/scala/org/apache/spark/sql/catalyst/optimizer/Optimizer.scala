@@ -1799,8 +1799,10 @@ object PushPredicateThroughNonJoin extends Rule[LogicalPlan] with PredicateHelpe
     case Filter(condition, project @ Project(fields, grandChild))
       if fields.forall(_.deterministic) && canPushThroughCondition(grandChild, condition) =>
       val aliasMap = getAliasMap(project)
-      val replaced = With.rewriteConditionByWith(condition, aliasMap)
-      project.copy(child = Filter(replaced, grandChild))
+      val cheapAliasMap = AttributeMap(aliasMap.filter(m => CollapseProject.isCheap(m._2.child)))
+      val replaced = replaceAlias(condition, cheapAliasMap)
+      val replacedByWith = With.rewriteConditionByWith(replaced, aliasMap)
+      project.copy(child = Filter(replacedByWith, grandChild))
 
     // We can push down deterministic predicate through Aggregate, including throwable predicate.
     // If we can push down a filter through Aggregate, it means the filter only references the
@@ -1820,8 +1822,10 @@ object PushPredicateThroughNonJoin extends Rule[LogicalPlan] with PredicateHelpe
       }
 
       if (pushDown.nonEmpty) {
-        val replaced = With.rewriteConditionByWith(pushDown.reduce(And), aliasMap)
-        val newAggregate = aggregate.copy(child = Filter(replaced, aggregate.child))
+        val cheapAliasMap = AttributeMap(aliasMap.filter(m => CollapseProject.isCheap(m._2.child)))
+        val replaced = replaceAlias(pushDown.reduce(And), cheapAliasMap)
+        val replacedByWith = With.rewriteConditionByWith(replaced, aliasMap)
+        val newAggregate = aggregate.copy(child = Filter(replacedByWith, aggregate.child))
         // If there is no more filter to stay up, just eliminate the filter.
         // Otherwise, create "Filter(stayUp) <- Aggregate <- Filter(pushDownPredicate)".
         if (stayUp.isEmpty) newAggregate else Filter(stayUp.reduce(And), newAggregate)
