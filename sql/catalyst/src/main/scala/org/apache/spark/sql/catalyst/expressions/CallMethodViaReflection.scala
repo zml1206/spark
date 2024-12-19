@@ -60,6 +60,9 @@ case class CallMethodViaReflection(children: Seq[Expression])
   with CodegenFallback
   with QueryErrorsBase {
 
+  // Pretty UDF-like
+  override protected[spark] val _expectedCost = 200
+
   override def prettyName: String = getTagValue(FunctionRegistry.FUNC_ALIAS).getOrElse("reflect")
 
   override def checkInputDataTypes(): TypeCheckResult = {

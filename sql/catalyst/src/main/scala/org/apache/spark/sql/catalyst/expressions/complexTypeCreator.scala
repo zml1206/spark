@@ -554,6 +554,8 @@ case class CreateNamedStruct(children: Seq[Expression]) extends Expression with 
 case class StringToMap(text: Expression, pairDelim: Expression, keyValueDelim: Expression)
   extends TernaryExpression with ExpectsInputTypes with NullIntolerant {
 
+  override protected[spark] val _expectedCost = 100
+
   def this(child: Expression, pairDelim: Expression) = {
     this(child, pairDelim, Literal(":"))
   }

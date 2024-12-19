@@ -3945,6 +3945,7 @@ trait ArrayBinaryLike
   extends BinaryArrayExpressionWithImplicitCast with ArraySetLike with NullIntolerant {
   override protected def dt: DataType = dataType
   override protected def et: DataType = elementType
+  override protected[spark] val _expectedCost = 200
 
   override def checkInputDataTypes(): TypeCheckResult = {
     val typeCheckResult = super.checkInputDataTypes()

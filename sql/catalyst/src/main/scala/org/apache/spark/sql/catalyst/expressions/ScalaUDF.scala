@@ -1206,4 +1206,6 @@ case class ScalaUDF(
 
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): ScalaUDF =
     copy(children = newChildren)
+
+  override protected[spark] val _expectedCost = 2000
 }

@@ -133,6 +133,7 @@ case class GetJsonObject(json: Expression, path: Expression)
   import SharedFactory._
   import WriteStyle._
 
+  override protected[spark] val _expectedCost = 100
   override def left: Expression = json
   override def right: Expression = path
   override def inputTypes: Seq[DataType] = Seq(StringType, StringType)
@@ -679,6 +680,8 @@ case class StructsToJson(
   with ExpectsInputTypes
   with NullIntolerant
   with QueryErrorsBase {
+
+  override protected[spark] val _expectedCost = 200
 
   override def nullable: Boolean = true
 
