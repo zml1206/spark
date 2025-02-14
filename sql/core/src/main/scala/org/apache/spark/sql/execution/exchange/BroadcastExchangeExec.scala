@@ -24,7 +24,7 @@ import scala.concurrent.{ExecutionContext, Promise}
 import scala.concurrent.duration.NANOSECONDS
 import scala.util.control.NonFatal
 
-import org.apache.spark.{broadcast, SparkContext, SparkException}
+import org.apache.spark.{broadcast, SparkException}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
@@ -47,8 +47,7 @@ trait BroadcastExchangeLike extends Exchange {
   /**
    * The broadcast job group ID
    */
-  def runId: UUID = Option(sparkContext.getLocalProperty(SparkContext.SPARK_JOB_GROUP_ID))
-    .map(UUID.fromString).getOrElse(UUID.randomUUID)
+  def runId: UUID = UUID.randomUUID
 
   /**
    * The asynchronous job that prepares the broadcast relation.
