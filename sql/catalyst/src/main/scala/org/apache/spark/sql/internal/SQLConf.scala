@@ -3158,6 +3158,27 @@ object SQLConf {
       .booleanConf
       .createWithDefault(true)
 
+  val ALWAYS_INLINE_COMMON_EXPR =
+    buildConf("spark.sql.alwaysInlineCommonExpr")
+      .internal()
+      .doc("When true, always inline common expressions instead of using the WITH expression. " +
+        "This may lead to duplicated expressions and the config should only be enabled if you " +
+        "hit bugs caused by the WITH expression.")
+      .version("4.0.0")
+      .booleanConf
+      .createWithDefault(false)
+
+  val USE_COMMON_EXPR_ID_FOR_ALIAS =
+    buildConf("spark.sql.useCommonExprIdForAlias")
+      .internal()
+      .doc("When true, use the common expression ID for the alias when rewriting With " +
+        "expressions. Otherwise, use the index of the common expression definition. When true " +
+        "this avoids duplicate alias names, but is helpful to set to false for testing to ensure " +
+        "that alias names are consistent.")
+      .version("4.0.0")
+      .booleanConf
+      .createWithDefault(true)
+
   val USE_NULLS_FOR_MISSING_DEFAULT_COLUMN_VALUES =
     buildConf("spark.sql.defaultColumn.useNullsForMissingDefaultValues")
       .internal()
